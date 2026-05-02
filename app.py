@@ -1,7 +1,7 @@
 """主应用类"""
 
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import filedialog, ttk
 import os
 import datetime
 from PIL import Image, ImageTk
@@ -33,6 +33,11 @@ class PicturePuzzleApp:
         # 预览尺寸（会根据区域宽度自动计算）
         self.preview_width = 158
         self.preview_height = 251
+
+        # 输出尺寸
+        self.output_scale_percent = DEFAULT_SCALE_PERCENT
+        self.output_width = BASE_OUTPUT_WIDTH
+        self.output_height = BASE_OUTPUT_HEIGHT
         
         # 数据结构
         self.left_grids = {}        # {(row, col): (x1,y1,x2,y2)}
@@ -75,6 +80,25 @@ class PicturePuzzleApp:
                            bg=color, fg='white', padx=15, pady=5, cursor='hand2',
                            command=cmd)
             btn.pack(side=tk.LEFT, padx=5)
+
+        # 输出尺寸控制
+        output_frame = tk.Frame(button_frame, bg=BG_COLOR)
+        output_frame.pack(side=tk.LEFT, padx=20)
+
+        tk.Label(output_frame, text="输出尺寸:", font=('Arial', 11),
+                bg=BG_COLOR, fg='white').pack(side=tk.LEFT)
+
+        self.output_scale_var = tk.IntVar(value=self.output_scale_percent)
+        scale_slider = tk.Scale(output_frame, from_=MIN_SCALE_PERCENT, to=MAX_SCALE_PERCENT,
+                                orient=tk.HORIZONTAL, length=150,
+                                variable=self.output_scale_var,
+                                command=self._on_output_scale_change,
+                                bg=BG_COLOR, fg='white', highlightthickness=0)
+        scale_slider.pack(side=tk.LEFT, padx=5)
+
+        self.output_scale_label = tk.Label(output_frame, text="100%", font=('Arial', 10),
+                                        bg=BG_COLOR, fg='white')
+        self.output_scale_label.pack(side=tk.LEFT, padx=5)
         
         # 形状调节
         shape_frame = tk.Frame(button_frame, bg=BG_COLOR)
@@ -161,6 +185,16 @@ class PicturePuzzleApp:
         self.status_label = tk.Label(self.root, text="拖拽图片到左侧格子 | 自动计算形状",
                                       font=('Arial', 10), bg=BG_COLOR, fg='#ecf0f1', anchor=tk.W)
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=10)
+
+        status_frame = tk.Frame(self.root, bg=BG_COLOR)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=10)
+
+        self.status_label = tk.Label(status_frame, text="拖拽图片到左侧格子 | 自动计算形状",
+                                    font=('Arial', 10), bg=BG_COLOR, fg='#ecf0f1', anchor=tk.W)
+        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.progress_bar = ttk.Progressbar(status_frame, length=200, mode='determinate')
+        self.progress_bar.pack(side=tk.RIGHT)
         
         # 绑定释放事件
         self.root.bind("<ButtonRelease-1>", self.drag_handler.on_drop)
@@ -219,6 +253,7 @@ class PicturePuzzleApp:
                         try:
                             img_path = os.path.join(folder_path, img_file)
                             pil_img = Image.open(img_path)
+         
                             img_data = {
                                 'pil': self._resize_to_preview(pil_img),
                                 'tk_big': ImageTk.PhotoImage(self._resize_to_preview(pil_img)),
@@ -509,24 +544,47 @@ class PicturePuzzleApp:
     
     def output_composite(self):
         """输出拼合图片"""
-        if not any(self.grid_contents.get(k) for k in self.left_grids):
-            self.update_status("左侧格子为空")
-            return
-        
-        output_width = self.grid_cols * self.preview_width
-        output_height = self.grid_rows * self.preview_height
-        final_image = Image.new('RGB', (output_width, output_height), 'white')
-        
+        # 统计需要输出的图片数量
+        output_list = []
         for row in range(self.grid_rows):
             for col in range(self.grid_cols):
                 img_data = self.grid_contents.get((row, col))
                 if img_data:
-                    final_image.paste(img_data['pil'], (col * self.preview_width, row * self.preview_height))
+                    output_list.append((row, col, img_data))
         
+        if not output_list:
+            self.update_status("左侧格子为空")
+            return
+        
+        # 显示进度条
+        self.progress_bar['value'] = 0
+        self.progress_bar['maximum'] = len(output_list)
+        self.root.update_idletasks()
+        
+        output_width = self.grid_cols * self.output_width
+        output_height = self.grid_rows * self.output_height
+        final_image = Image.new('RGB', (output_width, output_height), 'white')
+        
+        for idx, (row, col, img_data) in enumerate(output_list):
+            # 更新进度
+            self.progress_bar['value'] = idx + 1
+            self.update_status(f"正在处理: {idx+1}/{len(output_list)} - {img_data['label']}")
+            self.root.update_idletasks()
+            
+            # 读取并缩放图片
+            with Image.open(img_data['path']) as original:
+                scaled_img = original.resize((self.output_width, self.output_height), Image.Resampling.LANCZOS)
+                final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
+        
+        # 保存文件
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"composite_{self.grid_rows}x{self.grid_cols}_{timestamp}.png"
-        final_image.save(os.path.join(self.output_dir, filename))
-        self.update_status(f"已保存: {filename}")
+        filename = f"composite_{self.grid_rows}x{self.grid_cols}_{self.output_width}x{self.output_height}_{timestamp}.png"
+        save_path = os.path.join(self.output_dir, filename)
+        final_image.save(save_path)
+        
+        # 完成
+        self.progress_bar['value'] = 0
+        self.update_status(f"已保存: {filename} (每格{self.output_width}x{self.output_height})")
         
     def _import_image(self):
         """导入图片"""
@@ -539,6 +597,7 @@ class PicturePuzzleApp:
             self.folder_images[folder] = []
         
         pil_img = Image.open(file_path)
+        
         img_data = {
             'pil': self._resize_to_preview(pil_img),
             'tk_big': ImageTk.PhotoImage(self._resize_to_preview(pil_img)),
@@ -559,6 +618,8 @@ class PicturePuzzleApp:
     
     def reset_all(self):
         """重置所有"""
+        self.output_scale_var.set(DEFAULT_SCALE_PERCENT)
+        self._on_output_scale_change()
         for key, img_data in list(self.grid_contents.items()):
             if img_data:
                 folder = img_data.get('folder', '已放回图片')
@@ -606,3 +667,10 @@ class PicturePuzzleApp:
         for img_data in self.all_images:
             img_data['pil'] = self._resize_to_preview(Image.open(img_data['path']).convert('RGB'))
             img_data['tk_big'] = ImageTk.PhotoImage(img_data['pil'])
+
+    def _on_output_scale_change(self, event=None):
+        percent = self.output_scale_var.get() / 100.0
+        self.output_width = int(BASE_OUTPUT_WIDTH * percent)
+        self.output_height = int(BASE_OUTPUT_HEIGHT * percent)
+        self.output_scale_label.config(text=f"{self.output_scale_var.get()}%")
+        self.update_status(f"输出尺寸: {self.output_width}x{self.output_height}")

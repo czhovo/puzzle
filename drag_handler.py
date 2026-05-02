@@ -108,14 +108,23 @@ class DragHandler:
         self._cleanup_drag()
     
     def _find_target_grid(self, mouse_x, mouse_y):
-        """查找鼠标所在的格子"""
+        """查找鼠标所在的格子（考虑滚动偏移）"""
+        # 获取画布可视区域相对于屏幕的坐标
+        canvas_root_x = self.app.left_canvas.winfo_rootx()
+        canvas_root_y = self.app.left_canvas.winfo_rooty()
+        
+        # 获取当前滚动偏移量
+        scroll_x = self.app.left_canvas.canvasx(0)
+        scroll_y = self.app.left_canvas.canvasy(0)
+        
         for key, (x1, y1, x2, y2) in self.app.left_grids.items():
-            canvas_x = self.app.left_canvas.winfo_rootx() + x1
-            canvas_y = self.app.left_canvas.winfo_rooty() + y1
-            canvas_x2 = self.app.left_canvas.winfo_rootx() + x2
-            canvas_y2 = self.app.left_canvas.winfo_rooty() + y2
+            # 格子实际的屏幕坐标 = 画布屏幕坐标 + 格子内容坐标 - 滚动偏移
+            actual_x = canvas_root_x + x1 - scroll_x
+            actual_y = canvas_root_y + y1 - scroll_y
+            actual_x2 = canvas_root_x + x2 - scroll_x
+            actual_y2 = canvas_root_y + y2 - scroll_y
             
-            if canvas_x <= mouse_x <= canvas_x2 and canvas_y <= mouse_y <= canvas_y2:
+            if actual_x <= mouse_x <= actual_x2 and actual_y <= mouse_y <= actual_y2:
                 return key
         return None
     
