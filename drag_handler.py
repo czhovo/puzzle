@@ -2,7 +2,6 @@
 
 import tkinter as tk
 from PIL import Image, ImageTk
-from constants import BIG_WIDTH, BIG_HEIGHT
 
 
 class DragHandler:
@@ -50,13 +49,15 @@ class DragHandler:
         """开始拖拽右侧小图"""
         img_data = self.app.folder_images[folder_name][idx]
         
-        # 创建大图预览用于拖拽
-        from PIL import Image as PILImage  # 另一种导入方式，避免命名冲突
+        # 使用当前预览尺寸
+        preview_width = self.app.preview_width
+        preview_height = self.app.preview_height
+        
         drag_img = ImageTk.PhotoImage(
-            img_data['pil'].resize((BIG_WIDTH, BIG_HEIGHT), PILImage.Resampling.LANCZOS)
+            img_data['pil'].resize((preview_width, preview_height), Image.Resampling.LANCZOS)
         )
         self._create_drag_window(drag_img, event.x_root, event.y_root)
-        self.drag_label.image = drag_img  # 保持引用
+        self.drag_label.image = drag_img
         
         self.drag_data = {
             "item": event.widget,
@@ -66,8 +67,8 @@ class DragHandler:
             "source_key": None,
             "start_x": event.x_root,
             "start_y": event.y_root,
-            "orig_x": event.widget.winfo_rootx(),
-            "orig_y": event.widget.winfo_rooty(),
+            "orig_x": event.x_root,
+            "orig_y": event.y_root,
             "img_data": img_data
         }
     
@@ -96,19 +97,14 @@ class DragHandler:
         
         mouse_x, mouse_y = event.x_root, event.y_root
         
-        # 查找目标格子
         target_key = self._find_target_grid(mouse_x, mouse_y)
-        
-        # 检查是否在右侧区域
         is_in_right = self._is_in_right_area(mouse_x, mouse_y)
         
-        # 执行放置
         if self.drag_data["type"] == "unplaced":
             self._handle_unplaced_drop(target_key)
         elif self.drag_data["type"] == "grid":
             self._handle_grid_drop(target_key, is_in_right)
         
-        # 清理
         self._cleanup_drag()
     
     def _find_target_grid(self, mouse_x, mouse_y):
@@ -149,14 +145,12 @@ class DragHandler:
         
         if target_key is not None and target_key != source_key:
             if self.app.grid_contents.get(target_key) is None:
-                # 移动到空格子
                 self.app.grid_contents[target_key] = img_data
                 self.app.grid_contents[source_key] = None
                 self.app.draw_grid_image(target_key)
                 self.app.draw_grid_image(source_key)
                 self.app.update_status(f"✓ 图片已移动")
             else:
-                # 交换
                 target_img = self.app.grid_contents[target_key]
                 self.app.grid_contents[source_key] = target_img
                 self.app.grid_contents[target_key] = img_data

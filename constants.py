@@ -1,10 +1,11 @@
 """常量配置"""
 
-# 图片尺寸
-BIG_WIDTH = 158
-BIG_HEIGHT = 251
-SMALL_WIDTH = 80
-SMALL_HEIGHT = int(80 * 1.59)  # 127
+# 格子宽高比（158:251 = 1:1.5886）
+GRID_ASPECT_RATIO = 251 / 158
+
+# 预览图尺寸范围
+MIN_PREVIEW_WIDTH = 80
+MAX_PREVIEW_WIDTH = 400
 
 # 颜色
 BG_COLOR = '#2c3e50'
