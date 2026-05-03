@@ -228,76 +228,111 @@ class PicturePuzzleApp:
     def _resize_to_preview(self, pil_image):
         return pil_image.resize((self.preview_width, self.preview_height), Image.Resampling.LANCZOS)
     
-    def _resize_to_small(self, pil_image):
-        """缩放到右侧小图尺寸"""
-        small_width = 80
-        small_height = int(80 * GRID_ASPECT_RATIO)
+    def _resize_to_small(self, pil_image, pic_type='standard'): 
+        small_height = int(80 * GRID_ASPECT_RATIO)  
+        small_width = 80 if pic_type == 'standard' else 160
         return pil_image.resize((small_width, small_height), Image.Resampling.LANCZOS)
-    
+            
     def _load_images_from_folder(self):
-        """从 imgs 文件夹加载图片"""
+        """从 imgs 文件夹加载图片：子文件夹内的图片 + 根目录的独立图片"""
         imgs_dir = os.path.join(self.base_dir, IMGS_DIR_NAME)
         if not os.path.exists(imgs_dir):
             os.makedirs(imgs_dir)
             return
-        
+
         self.folder_images = {}
         self.all_images = []
-        
+        default_folder = "未分类"   # 用于存放根目录下的独立图片
+
         for item in sorted(os.listdir(imgs_dir)):
-            folder_path = os.path.join(imgs_dir, item)
-            if os.path.isdir(folder_path):
-                self.folder_images[item] = []
-                for img_file in sorted(os.listdir(folder_path)):
+            item_path = os.path.join(imgs_dir, item)
+
+            # 子文件夹：遍历内部图片
+            if os.path.isdir(item_path):
+                folder_name = item
+                self.folder_images[folder_name] = []
+                for img_file in sorted(os.listdir(item_path)):
                     if img_file.lower().endswith(IMAGE_EXTENSIONS):
-                        try:
-                            img_path = os.path.join(folder_path, img_file)
-                            pil_img = Image.open(img_path)
-         
-                            img_data = {
-                                'pil': self._resize_to_preview(pil_img),
-                                'tk_big': ImageTk.PhotoImage(self._resize_to_preview(pil_img)),
-                                'tk_small': ImageTk.PhotoImage(self._resize_to_small(pil_img)),
-                                'label': img_file,
-                                'path': img_path,
-                                'filename': img_file,
-                                'folder': item,
-                                'canvas_item': None,
-                                'x': 0,
-                                'y': 0
-                            }
-                            self.folder_images[item].append(img_data)
-                            self.all_images.append(img_data)
-                        except Exception as e:
-                            print(f"加载失败 {img_file}: {e}")
-    
+                        self._add_image_from_path(
+                            os.path.join(item_path, img_file),
+                            folder_name,
+                            img_file
+                        )
+
+            # 根目录下的独立图片文件
+            elif os.path.isfile(item_path) and item.lower().endswith(IMAGE_EXTENSIONS):
+                if default_folder not in self.folder_images:
+                    self.folder_images[default_folder] = []
+                self._add_image_from_path(item_path, default_folder, item)
+
+    def _add_image_from_path(self, img_path, folder_name, img_file):
+        """辅助方法：从路径加载一张图片，判断类型并加入数据结构"""
+        try:
+            pil_img = Image.open(img_path)
+            w, h = pil_img.size
+            ratio = w / h
+
+            # 类型判断
+            if abs(ratio - STANDARD_RATIO) / STANDARD_RATIO <= RATIO_TOLERANCE:
+                pic_type = 'standard'
+            elif abs(ratio - WIDE_RATIO) / WIDE_RATIO <= RATIO_TOLERANCE:
+                pic_type = 'wide'
+            else:
+                print(f"跳过尺寸不符的图片: {img_file} (宽高比 {ratio:.3f})")
+                return
+
+            preview_pil = self._resize_to_preview(pil_img)
+            small_pil = self._resize_to_small(pil_img, pic_type)
+
+            img_data = {
+                'pil': preview_pil,
+                'tk_big': ImageTk.PhotoImage(preview_pil),
+                'tk_small': ImageTk.PhotoImage(small_pil),
+                'label': img_file,
+                'path': img_path,
+                'filename': img_file,
+                'folder': folder_name,
+                'canvas_item': None,
+                'x': 0,
+                'y': 0,
+                'pic_type': pic_type,
+                'grid_start': None
+            }
+            self.folder_images[folder_name].append(img_data)
+            self.all_images.append(img_data)
+        except Exception as e:
+            print(f"加载失败 {img_file}: {e}")
+
     def auto_calculate_shape(self):
         """自动计算最佳形状"""
         left_count = sum(1 for img in self.grid_contents.values() if img)
         total_count = len(self.all_images) + left_count
-        
+
         if total_count == 0:
             self.grid_rows, self.grid_cols = DEFAULT_ROWS, DEFAULT_COLS
         else:
             n = max(1, int(total_count ** 0.5))
             self.grid_rows = n
             self.grid_cols = (total_count + n - 1) // n
-        
+
         self.grid_count = self.grid_rows * self.grid_cols
         self.rows_var.set(self.grid_rows)
         self.cols_var.set(self.grid_cols)
-        
-        # 重新计算预览尺寸
+
         self._calculate_preview_size()
-        
-        # 重置所有图片到右侧
-        for key, img_data in list(self.grid_contents.items()):
+
+        # 去重收集左侧图片
+        unique_imgs = {}
+        for img_data in self.grid_contents.values():
             if img_data:
-                folder = img_data.get('folder', '已放回图片')
-                self.folder_images.setdefault(folder, []).append(img_data)
-                if img_data not in self.all_images:
-                    self.all_images.append(img_data)
-        
+                unique_imgs[id(img_data)] = img_data
+
+        for img_data in unique_imgs.values():
+            folder = img_data.get('folder', '已放回图片')
+            self.folder_images.setdefault(folder, []).append(img_data)
+            if img_data not in self.all_images:
+                self.all_images.append(img_data)
+
         self._init_grids()
         self.left_grids = {}
         self._draw_left_grids()
@@ -309,24 +344,27 @@ class PicturePuzzleApp:
         self.grid_rows = self.rows_var.get()
         self.grid_cols = self.cols_var.get()
         self.grid_count = self.grid_rows * self.grid_cols
-        
-        # 重新计算预览尺寸
+
         self._calculate_preview_size()
-        
-        # 放回所有左侧图片
-        for key, img_data in list(self.grid_contents.items()):
+
+        # 去重收集左侧图片
+        unique_imgs = {}
+        for img_data in self.grid_contents.values():
             if img_data:
-                folder = img_data.get('folder', '已放回图片')
-                self.folder_images.setdefault(folder, []).append(img_data)
-                if img_data not in self.all_images:
-                    self.all_images.append(img_data)
-        
+                unique_imgs[id(img_data)] = img_data
+
+        for img_data in unique_imgs.values():
+            folder = img_data.get('folder', '已放回图片')
+            self.folder_images.setdefault(folder, []).append(img_data)
+            if img_data not in self.all_images:
+                self.all_images.append(img_data)
+
         self._init_grids()
         self.left_grids = {}
         self._draw_left_grids()
         self._draw_right_sections()
         self.update_status(f"已调整形状为: {self.grid_rows}行 x {self.grid_cols}列")
-    
+        
     def _draw_left_grids(self):
         """绘制左侧格子"""
         self.left_canvas.delete("all")
@@ -384,119 +422,175 @@ class PicturePuzzleApp:
                 self.draw_grid_image(key)
     
     def draw_grid_image(self, key):
+        """绘制或更新某个格子里的图片"""
+        # 如果该格子已有图片项，先删除
         if self.grid_images.get(key):
             self.left_canvas.delete(self.grid_images[key])
-        
-        content = self.grid_contents.get(key)
-        if content is None or key not in self.left_grids:
+            self.grid_images[key] = None
+
+        img_data = self.grid_contents.get(key)
+        if img_data is None:
             return
-        
-        x1, y1, x2, y2 = self.left_grids[key]
-        
-        # 重新缩放图片到当前预览尺寸
-        img_pil = content['pil'].resize((self.preview_width, self.preview_height), Image.Resampling.LANCZOS)
-        img_tk = ImageTk.PhotoImage(img_pil)
-        content['pil'] = img_pil
-        content['tk_big'] = img_tk
-        
-        img_item = self.left_canvas.create_image(x1, y1, anchor=tk.NW, image=img_tk)
-        self.grid_images[key] = img_item
-        
-        # 绑定事件不变
-        self.left_canvas.tag_bind(img_item, "<ButtonPress-1>", lambda e, k=key: self.drag_handler.start_grid_drag(e, k))
-        self.left_canvas.tag_bind(img_item, "<B1-Motion>", self.drag_handler.on_drag_move)
+
+        # 判断是否为宽幅图的起始格
+        if img_data.get('pic_type') == 'wide' and img_data.get('grid_start') == key:
+            # 宽幅图，跨两个格子：key 和 (r, c+1)
+            r, c = key
+            next_key = (r, c + 1)
+            if next_key not in self.left_grids:
+                # 列数不足，理论上不应发生
+                return
+
+            x1, y1, _, _ = self.left_grids[key]
+            _, _, x2, y2 = self.left_grids[next_key]
+
+            # 重新缩放图片到跨格尺寸
+            span_w = x2 - x1
+            span_h = y2 - y1
+            scaled = img_data['pil'].resize((span_w, span_h), Image.Resampling.LANCZOS)
+            img_data['tk_span'] = ImageTk.PhotoImage(scaled)   # 缓存跨格大图
+
+            img_item = self.left_canvas.create_image(x1, y1, anchor=tk.NW, image=img_data['tk_span'])
+            self.grid_images[key] = img_item
+            self.grid_images[next_key] = None   # 第二个格子由起始格覆盖，不再单独绘制
+
+            # 绑定事件（拖拽时也会用到，此处先简单绑定到起始格）
+            self.left_canvas.tag_bind(img_item, "<ButtonPress-1>",
+                                    lambda e, k=key: self.drag_handler.start_grid_drag(e, k))
+            self.left_canvas.tag_bind(img_item, "<B1-Motion>", self.drag_handler.on_drag_move)
+
+        elif img_data.get('pic_type') == 'wide' and img_data.get('grid_start') != key:
+            # 宽幅图的第二个格子，什么都不画（起始格已覆盖）
+            pass
+        else:
+            # 标准图
+            if key not in self.left_grids:
+                return
+            x1, y1, x2, y2 = self.left_grids[key]
+            w = x2 - x1
+            h = y2 - y1
+            scaled = img_data['pil'].resize((w, h), Image.Resampling.LANCZOS)
+            img_data['tk_big'] = ImageTk.PhotoImage(scaled)
+            img_item = self.left_canvas.create_image(x1, y1, anchor=tk.NW, image=img_data['tk_big'])
+            self.grid_images[key] = img_item
+            self.left_canvas.tag_bind(img_item, "<ButtonPress-1>",
+                                    lambda e, k=key: self.drag_handler.start_grid_drag(e, k))
+            self.left_canvas.tag_bind(img_item, "<B1-Motion>", self.drag_handler.on_drag_move)
         
     def _draw_right_sections(self):
-        """绘制右侧区域 - 直接在 Canvas 上绘制"""
         self.right_canvas.delete("all")
-        
+
         if not self.folder_images:
             self.right_canvas.create_text(
-                150, 200, 
+                150, 200,
                 text="暂无图片\n\n请将图片放入\nimgs/子文件夹中",
                 font=('Arial', 12), fill='#ecf0f1', justify=tk.CENTER
             )
             self.right_canvas.configure(scrollregion=(0, 0, 300, 400))
             return
-        
+
         self.right_canvas.update_idletasks()
         canvas_width = self.right_canvas.winfo_width()
         if canvas_width <= 1:
             canvas_width = 280
-        
-        # 右侧小图尺寸固定
-        small_width = 80
-        small_height = int(80 * GRID_ASPECT_RATIO)
-        cols_per_row = max(1, (canvas_width - 20) // (small_width + 15))
-        
+
+        small_height = int(80 * GRID_ASPECT_RATIO)   # 统一高度 ≈127
+        margin_x = 10
+        margin_y = 10
+        start_x = 15
         current_y = 10
-        
+
         for folder_name, images in self.folder_images.items():
             if not images:
                 continue
-            
+
+            # 文件夹标题
             self.right_canvas.create_text(
-                15, current_y, anchor=tk.NW,
+                start_x, current_y, anchor=tk.NW,
                 text=f"📁 {folder_name} ({len(images)}张)",
                 font=('Arial', 12, 'bold'), fill='#ecf0f1', tags=('right_title',)
             )
             current_y += 30
-            
-            row_height = small_height + 30
-            
+
+            x = start_x
+            row_height = small_height + 25  # 图+文字
+
             for idx, img_data in enumerate(images):
-                row = idx // cols_per_row
-                col = idx % cols_per_row
-                
-                x = 15 + col * (small_width + 15)
-                y = current_y + row * row_height
-                
+                # 按顺序获取宽度
+                if img_data['pic_type'] == 'wide':
+                    img_w = int(small_height * WIDE_RATIO)    # ≈160
+                else:
+                    img_w = int(small_height * STANDARD_RATIO) # ≈80
+
+                # 如果放不下则换行
+                if x + img_w > canvas_width - 10:
+                    x = start_x
+                    current_y += row_height + margin_y
+
+                y = current_y
+
+                # 背景
                 self.right_canvas.create_rectangle(
-                    x, y, x + small_width, y + small_height,
+                    x, y, x + img_w, y + small_height,
                     outline='#5a7a9a', fill='#2c3e50', width=1,
                     tags=(f"right_bg_{folder_name}_{idx}",)
                 )
-                
+                # 图片
                 img_item = self.right_canvas.create_image(
-                    x, y, anchor=tk.NW, 
+                    x, y, anchor=tk.NW,
                     image=img_data['tk_small'],
                     tags=(f"right_img_{folder_name}_{idx}",)
                 )
-                
+                # 文件名
                 text = img_data['label'][:12]
                 self.right_canvas.create_text(
-                    x + small_width//2, y + small_height + 5,
+                    x + img_w // 2, y + small_height + 5,
                     text=text, font=('Arial', 8), fill='white',
                     tags=(f"right_text_{folder_name}_{idx}",)
                 )
-                
+                # 宽幅标记
+                if img_data['pic_type'] == 'wide':
+                    tri_size = 24
+                    self.right_canvas.create_polygon(
+                        x, y, x + tri_size, y, x, y + tri_size,
+                        fill='gold', outline='black',
+                        tags=(f"right_wide_{folder_name}_{idx}",)
+                    )
+                    self.right_canvas.create_text(
+                        x + 2, y + 6, angle=45, text="W", font=('Arial', 7, 'bold'),
+                        fill='black', anchor=tk.NW,
+                        tags=(f"right_wide_text_{folder_name}_{idx}",)
+                    )
+
                 img_data['canvas_item'] = img_item
                 img_data['x'] = x
                 img_data['y'] = y
-                
-                self.right_canvas.tag_bind(img_item, "<ButtonPress-1>", 
+
+                # 绑定拖拽
+                self.right_canvas.tag_bind(img_item, "<ButtonPress-1>",
                                         lambda e, f=folder_name, i=idx: self.drag_handler.start_small_drag(e, f, i))
                 self.right_canvas.tag_bind(img_item, "<B1-Motion>", self.drag_handler.on_drag_move)
-            
-            total_rows = (len(images) + cols_per_row - 1) // cols_per_row
-            current_y += total_rows * row_height + 20
-        
+
+                x += img_w + margin_x   # 移动到下一张的起始位置
+
+            # 下一个文件夹另起一行
+            current_y += row_height + 20
+
         total_height = current_y + 20
         canvas_width = max(300, canvas_width)
         self.right_canvas.configure(scrollregion=(0, 0, canvas_width, total_height))
 
     def _remove_image_from_right_canvas(self, folder_name, idx):
-        """从右侧画布中删除图片项"""
         self.right_canvas.delete(f"right_img_{folder_name}_{idx}")
         self.right_canvas.delete(f"right_bg_{folder_name}_{idx}")
         self.right_canvas.delete(f"right_text_{folder_name}_{idx}")
+        self.right_canvas.delete(f"right_wide_{folder_name}_{idx}")
+        self.right_canvas.delete(f"right_wide_text_{folder_name}_{idx}")
     
     def place_image_to_grid(self, img_data, key):
-        """放置图片到格子"""
+        """放置图片到格子，key 为起始格（对于宽幅图，同时占用 key 和右侧邻格）"""
         folder = img_data['folder']
         idx = None
-        
-        # 找到图片在文件夹中的索引
         if folder in self.folder_images:
             for i, img in enumerate(self.folder_images[folder]):
                 if img is img_data:
@@ -504,113 +598,219 @@ class PicturePuzzleApp:
                     break
             if idx is not None:
                 self.folder_images[folder].pop(idx)
-                # 从右侧画布删除
                 self._remove_image_from_right_canvas(folder, idx)
-        
+
         if img_data in self.all_images:
             self.all_images.remove(img_data)
-        
-        self.grid_contents[key] = img_data
+
+        if img_data.get('pic_type') == 'wide':
+            # 检查是否为连续两个空格
+            r, c = key
+            next_key = (r, c + 1)
+            if next_key not in self.left_grids:
+                # 列不够，不能放置
+                self._add_back_to_folder(img_data, folder)   # 回退
+                return False
+            if self.grid_contents.get(key) is not None or self.grid_contents.get(next_key) is not None:
+                self._add_back_to_folder(img_data, folder)
+                return False
+
+            # 占用两个格子
+            self.grid_contents[key] = img_data
+            self.grid_contents[next_key] = img_data
+            img_data['grid_start'] = key
+        else:
+            if self.grid_contents.get(key) is not None:
+                self._add_back_to_folder(img_data, folder)
+                return False
+            self.grid_contents[key] = img_data
+            img_data['grid_start'] = key
+
         self.draw_grid_image(key)
+        if img_data.get('pic_type') == 'wide':
+            self.draw_grid_image((key[0], key[1]+1))   # 触发第二个格子的空白绘制
         self._draw_right_sections()
+        return True
+    
+    def _add_back_to_folder(self, img_data, folder_name):
+        """将图片重新加回右侧文件夹"""
+        if folder_name not in self.folder_images:
+            self.folder_images[folder_name] = []
+        self.folder_images[folder_name].append(img_data)
+        if img_data not in self.all_images:
+            self.all_images.append(img_data)
     
     def return_image_to_right(self, img_data, source_key):
-        """图片放回右侧"""
-        self.grid_contents[source_key] = None
-        if self.grid_images.get(source_key):
-            self.left_canvas.delete(self.grid_images[source_key])
-            self.grid_images[source_key] = None
-        
+        """将图片从格子放回右侧"""
+        if img_data.get('pic_type') == 'wide':
+            start = img_data.get('grid_start')
+            if start is None:
+                start = source_key
+            r, c = start
+            # 清除两个格子
+            self.grid_contents[(r, c)] = None
+            self.grid_contents[(r, c+1)] = None
+            if self.grid_images.get((r, c)):
+                self.left_canvas.delete(self.grid_images[(r, c)])
+                self.grid_images[(r, c)] = None
+            if self.grid_images.get((r, c+1)):
+                self.left_canvas.delete(self.grid_images[(r, c+1)])
+                self.grid_images[(r, c+1)] = None
+            img_data['grid_start'] = None
+        else:
+            self.grid_contents[source_key] = None
+            if self.grid_images.get(source_key):
+                self.left_canvas.delete(self.grid_images[source_key])
+                self.grid_images[source_key] = None
+            img_data['grid_start'] = None
+
         folder = img_data.get('folder', '已放回图片')
-        self.folder_images.setdefault(folder, []).append(img_data)
-        self.all_images.append(img_data)
+        if folder not in self.folder_images:
+            self.folder_images[folder] = []
+        self.folder_images[folder].append(img_data)
+        if img_data not in self.all_images:
+            self.all_images.append(img_data)
         self._draw_right_sections()
     
     def auto_place_images(self):
-        """自动放置图片"""
+        """自动放置图片：按 all_images 列表顺序依次放置"""
         if not self.all_images:
             self.update_status("没有图片可放置")
             return
+
+        placed = 0
+        skipped = 0
+
+        # 遍历副本，因为放置过程中 all_images 会变动
+        for img in self.all_images[:]:
+            if img.get('pic_type') == 'wide':
+                slot = self._find_consecutive_empty_slots()
+                if slot is None:
+                    skipped += 1
+                    continue
+                if self.place_image_to_grid(img, slot):
+                    placed += 1
+                else:
+                    skipped += 1
+            else:
+                # 任意一个空格即可
+                empty_keys = [k for k in self.left_grids if self.grid_contents.get(k) is None]
+                if not empty_keys:
+                    skipped += 1
+                    continue
+                if self.place_image_to_grid(img, empty_keys[0]):
+                    placed += 1
+                else:
+                    skipped += 1
+
+        msg = f"已放置 {placed} 张图片"
+        if skipped > 0:
+            msg += f"，{skipped} 张因无合适位置跳过"
+        self.update_status(msg)
+
+    def _find_consecutive_empty_slots(self):
+        """返回第一个水平连续两个空格的起始格 (r, c)，没有则返回 None"""
+        for r in range(self.grid_rows):
+            for c in range(self.grid_cols - 1):
+                if (self.grid_contents.get((r, c)) is None and
+                    self.grid_contents.get((r, c+1)) is None):
+                    return (r, c)
+        return None
         
-        empty_keys = sorted([k for k in self.left_grids if self.grid_contents.get(k) is None])
-        if not empty_keys:
-            self.update_status("所有格子都已满")
-            return
-        
-        for i, img_data in enumerate(self.all_images[:len(empty_keys)]):
-            self.place_image_to_grid(img_data, empty_keys[i])
-        
-        self.update_status(f"已自动放置 {min(len(self.all_images), len(empty_keys))} 张图片")
-    
     def output_composite(self):
-        """输出拼合图片"""
-        # 统计需要输出的图片数量
+        """输出拼合图片，宽幅图占据双倍宽度"""
         output_list = []
+        # 我们遍历格子，根据 grid_start 去重，确保每张图只输出一次
+        seen_ids = set()
         for row in range(self.grid_rows):
             for col in range(self.grid_cols):
                 img_data = self.grid_contents.get((row, col))
-                if img_data:
-                    output_list.append((row, col, img_data))
-        
+                if img_data is None:
+                    continue
+                # 对于宽幅图，只处理起始格
+                if img_data.get('pic_type') == 'wide':
+                    start = img_data.get('grid_start')
+                    if start != (row, col):
+                        continue
+                    if id(img_data) in seen_ids:
+                        continue
+                    seen_ids.add(id(img_data))
+                    output_list.append((row, col, img_data, 'wide'))
+                else:
+                    output_list.append((row, col, img_data, 'standard'))
+
         if not output_list:
             self.update_status("左侧格子为空")
             return
-        
-        # 显示进度条
+
         self.progress_bar['value'] = 0
         self.progress_bar['maximum'] = len(output_list)
         self.root.update_idletasks()
-        
+
         output_width = self.grid_cols * self.output_width
         output_height = self.grid_rows * self.output_height
         final_image = Image.new('RGB', (output_width, output_height), 'white')
-        
-        for idx, (row, col, img_data) in enumerate(output_list):
-            # 更新进度
+
+        for idx, (row, col, img_data, ptype) in enumerate(output_list):
             self.progress_bar['value'] = idx + 1
             self.update_status(f"正在处理: {idx+1}/{len(output_list)} - {img_data['label']}")
             self.root.update_idletasks()
-            
-            # 读取并缩放图片
+
             with Image.open(img_data['path']) as original:
-                scaled_img = original.resize((self.output_width, self.output_height), Image.Resampling.LANCZOS)
-                final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
-        
-        # 保存文件
+                if ptype == 'wide':
+                    # 宽幅图：宽=2*output_width, 高=output_height
+                    scaled_img = original.resize((2 * self.output_width, self.output_height),
+                                                Image.Resampling.LANCZOS)
+                    final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
+                else:
+                    scaled_img = original.resize((self.output_width, self.output_height),
+                                                Image.Resampling.LANCZOS)
+                    final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"composite_{self.grid_rows}x{self.grid_cols}_{self.output_width}x{self.output_height}_{timestamp}.png"
         save_path = os.path.join(self.output_dir, filename)
         final_image.save(save_path)
-        
-        # 完成
+
         self.progress_bar['value'] = 0
         self.update_status(f"已保存: {filename} (每格{self.output_width}x{self.output_height})")
         
     def _import_image(self):
-        """导入图片"""
         file_path = filedialog.askopenfilename(filetypes=[("图片文件", "*.jpg *.jpeg *.png *.bmp *.gif")])
         if not file_path:
             return
-        
+
         folder = list(self.folder_images.keys())[0] if self.folder_images else "导入图片"
         if folder not in self.folder_images:
             self.folder_images[folder] = []
-        
+
         pil_img = Image.open(file_path)
-        
+        w, h = pil_img.size
+        ratio = w / h
+
+        if abs(ratio - STANDARD_RATIO) / STANDARD_RATIO <= RATIO_TOLERANCE:
+            pic_type = 'standard'
+        elif abs(ratio - WIDE_RATIO) / WIDE_RATIO <= RATIO_TOLERANCE:
+            pic_type = 'wide'
+        else:
+            self.update_status(f"错误：图片宽高比 {ratio:.2f} 不符合标准或宽幅要求")
+            return
+
         img_data = {
             'pil': self._resize_to_preview(pil_img),
             'tk_big': ImageTk.PhotoImage(self._resize_to_preview(pil_img)),
-            'tk_small': ImageTk.PhotoImage(self._resize_to_small(pil_img)),
+            'tk_small': ImageTk.PhotoImage(self._resize_to_small(pil_img, pic_type)),
             'label': os.path.basename(file_path),
             'path': file_path,
             'filename': os.path.basename(file_path),
             'folder': folder,
             'canvas_item': None,
             'x': 0,
-            'y': 0
+            'y': 0,
+            'pic_type': pic_type,
+            'grid_start': None
         }
-        
+
         self.folder_images[folder].append(img_data)
         self.all_images.append(img_data)
         self._draw_right_sections()
@@ -620,13 +820,20 @@ class PicturePuzzleApp:
         """重置所有"""
         self.output_scale_var.set(DEFAULT_SCALE_PERCENT)
         self._on_output_scale_change()
-        for key, img_data in list(self.grid_contents.items()):
+
+        # 收集所有不重复的左侧图片（通过 id 去重）
+        unique_imgs = {}
+        for img_data in self.grid_contents.values():
             if img_data:
-                folder = img_data.get('folder', '已放回图片')
-                self.folder_images.setdefault(folder, []).append(img_data)
-                if img_data not in self.all_images:
-                    self.all_images.append(img_data)
-        
+                unique_imgs[id(img_data)] = img_data
+
+        # 逐一放回右侧
+        for img_data in unique_imgs.values():
+            folder = img_data.get('folder', '已放回图片')
+            self.folder_images.setdefault(folder, []).append(img_data)
+            if img_data not in self.all_images:
+                self.all_images.append(img_data)
+
         self._init_grids()
         self.left_grids = {}
         self._draw_left_grids()
