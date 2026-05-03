@@ -266,13 +266,12 @@ class PicturePuzzleApp:
                 self._add_image_from_path(item_path, default_folder, item)
 
     def _add_image_from_path(self, img_path, folder_name, img_file):
-        """辅助方法：从路径加载一张图片，判断类型并加入数据结构"""
         try:
-            pil_img = Image.open(img_path)
+            pil_img = self._open_and_auto_rotate(img_path)  # 自动旋转横向图
             w, h = pil_img.size
             ratio = w / h
 
-            # 类型判断
+            # 类型判断（使用旋转后的尺寸）
             if abs(ratio - STANDARD_RATIO) / STANDARD_RATIO <= RATIO_TOLERANCE:
                 pic_type = 'standard'
             elif abs(ratio - WIDE_RATIO) / WIDE_RATIO <= RATIO_TOLERANCE:
@@ -289,7 +288,7 @@ class PicturePuzzleApp:
                 'tk_big': ImageTk.PhotoImage(preview_pil),
                 'tk_small': ImageTk.PhotoImage(small_pil),
                 'label': img_file,
-                'path': img_path,
+                'path': img_path,          # 仍保留原始路径，但使用时都通过辅助方法打开
                 'filename': img_file,
                 'folder': folder_name,
                 'canvas_item': None,
@@ -756,16 +755,14 @@ class PicturePuzzleApp:
             self.update_status(f"正在处理: {idx+1}/{len(output_list)} - {img_data['label']}")
             self.root.update_idletasks()
 
-            with Image.open(img_data['path']) as original:
-                if ptype == 'wide':
-                    # 宽幅图：宽=2*output_width, 高=output_height
-                    scaled_img = original.resize((2 * self.output_width, self.output_height),
-                                                Image.Resampling.LANCZOS)
-                    final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
-                else:
-                    scaled_img = original.resize((self.output_width, self.output_height),
-                                                Image.Resampling.LANCZOS)
-                    final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
+            # 使用辅助方法打开并自动旋转横向图
+            original = self._open_and_auto_rotate(img_data['path'])
+            if ptype == 'wide':
+                scaled_img = original.resize((2 * self.output_width, self.output_height), Image.Resampling.LANCZOS)
+                final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
+            else:
+                scaled_img = original.resize((self.output_width, self.output_height), Image.Resampling.LANCZOS)
+                final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"composite_{self.grid_rows}x{self.grid_cols}_{self.output_width}x{self.output_height}_{timestamp}.png"
@@ -784,7 +781,7 @@ class PicturePuzzleApp:
         if folder not in self.folder_images:
             self.folder_images[folder] = []
 
-        pil_img = Image.open(file_path)
+        pil_img = self._open_and_auto_rotate(file_path)  # 自动旋转
         w, h = pil_img.size
         ratio = w / h
 
@@ -870,9 +867,10 @@ class PicturePuzzleApp:
         self._draw_right_sections()
 
     def _reload_preview_images(self):
-        """重新加载所有预览图"""
+        """重新加载所有预览图（窗口大小变化时调用）"""
         for img_data in self.all_images:
-            img_data['pil'] = self._resize_to_preview(Image.open(img_data['path']).convert('RGB'))
+            original = self._open_and_auto_rotate(img_data['path'])   # 自动旋转
+            img_data['pil'] = self._resize_to_preview(original)
             img_data['tk_big'] = ImageTk.PhotoImage(img_data['pil'])
 
     def _on_output_scale_change(self, event=None):
@@ -881,3 +879,15 @@ class PicturePuzzleApp:
         self.output_height = int(BASE_OUTPUT_HEIGHT * percent)
         self.output_scale_label.config(text=f"{self.output_scale_var.get()}%")
         self.update_status(f"输出尺寸: {self.output_width}x{self.output_height}")
+
+    def _open_and_auto_rotate(self, img_path):
+        """
+        打开图片并检测是否为横向标准图（宽高比≈1.59:1），
+        若是则顺时针旋转90度，返回旋转后的 PIL 图像。
+        """
+        pil_img = Image.open(img_path)
+        w, h = pil_img.size
+        ratio = w / h
+        if abs(ratio - GRID_ASPECT_RATIO) / GRID_ASPECT_RATIO <= RATIO_TOLERANCE:
+            pil_img = pil_img.rotate(-90, expand=True)
+        return pil_img
