@@ -156,7 +156,7 @@ class PicturePuzzleApp:
         
         # ========== 左侧区域 ==========
         left_frame = tk.Frame(main_paned, bg=BG_COLOR)
-        main_paned.add(left_frame, width=1300)
+        main_paned.add(left_frame, width=1250)
         
         left_canvas_frame = tk.Frame(left_frame, bg=BG_COLOR)
         left_canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -180,7 +180,7 @@ class PicturePuzzleApp:
         
         # ========== 右侧区域（直接在 Canvas 上绘制，与左侧结构一致）==========
         right_frame = tk.Frame(main_paned, bg=RIGHT_BG_COLOR)
-        main_paned.add(right_frame, width=500)
+        main_paned.add(right_frame, width=550)
         
         right_canvas_frame = tk.Frame(right_frame, bg=RIGHT_BG_COLOR)
         right_canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -234,10 +234,10 @@ class PicturePuzzleApp:
         width = available_width // self.grid_cols
         
         # 限制最小和最大宽度
-        if width < 80:
-            width = 80
-        elif width > 400:
-            width = 400
+        if width < MIN_PREVIEW_WIDTH:
+            width = MIN_PREVIEW_WIDTH
+        elif width > MAX_PREVIEW_WIDTH:
+            width = MAX_PREVIEW_WIDTH
         
         self.preview_width = width
         self.preview_height = int(width * GRID_ASPECT_RATIO)
