@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 import os
 import datetime
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageFilter
 
 from constants import *
 from drag_handler import DragHandler
@@ -16,7 +16,7 @@ class PicturePuzzleApp:
     def __init__(self, root):
         self.root = root
         self.root.title("图片拼图工具 - 自动形状拼合")
-        self.root.geometry("1400x800")
+        self.root.geometry("1800x800")
         self.root.configure(bg=BG_COLOR)
         
         # 输出目录
@@ -39,6 +39,9 @@ class PicturePuzzleApp:
         self.output_width = BASE_OUTPUT_WIDTH
         self.output_height = BASE_OUTPUT_HEIGHT
         
+        # 模糊
+        self.blur_percent = DEFAULT_BLUR_PERCENT
+
         # 数据结构
         self.left_grids = {}        # {(row, col): (x1,y1,x2,y2)}
         self.grid_contents = {}     # {(row, col): img_data}
@@ -71,8 +74,8 @@ class PicturePuzzleApp:
         # 按钮
         buttons = [
             ("📁 导入图片", '#27ae60', self._import_image),
-            ("💾 输出拼合图片", '#3498db', self.output_composite),
             ("🎯 自动放置图片", '#9b59b6', self.auto_place_images),
+            ("💾 输出拼合图片", '#3498db', self.output_composite),
             ("🔄 重置所有", '#e74c3c', self.reset_all),
         ]
         for text, color, cmd in buttons:
@@ -99,6 +102,25 @@ class PicturePuzzleApp:
         self.output_scale_label = tk.Label(output_frame, text="100%", font=('Arial', 10),
                                         bg=BG_COLOR, fg='white')
         self.output_scale_label.pack(side=tk.LEFT, padx=5)
+
+        # 模糊控制
+        blur_frame = tk.Frame(button_frame, bg=BG_COLOR)
+        blur_frame.pack(side=tk.LEFT, padx=20)
+
+        tk.Label(blur_frame, text="模糊:", font=('Arial', 11),
+                bg=BG_COLOR, fg='white').pack(side=tk.LEFT)
+        
+        self.blur_var = tk.IntVar(value=DEFAULT_BLUR_PERCENT)
+        self.blur_slider = tk.Scale(blur_frame, from_=MIN_BLUR_PERCENT, to=MAX_BLUR_PERCENT,
+                                    orient=tk.HORIZONTAL, length=120,
+                                    variable=self.blur_var,
+                                    command=self._on_blur_change,
+                                    bg=BG_COLOR, fg='white', highlightthickness=0)
+        self.blur_slider.pack(side=tk.LEFT, padx=5)
+
+        self.blur_label = tk.Label(blur_frame, text="0%", font=('Arial', 10),
+                                bg=BG_COLOR, fg='white')
+        self.blur_label.pack(side=tk.LEFT)
         
         # 形状调节
         shape_frame = tk.Frame(button_frame, bg=BG_COLOR)
@@ -134,7 +156,7 @@ class PicturePuzzleApp:
         
         # ========== 左侧区域 ==========
         left_frame = tk.Frame(main_paned, bg=BG_COLOR)
-        main_paned.add(left_frame, width=900)
+        main_paned.add(left_frame, width=1300)
         
         left_canvas_frame = tk.Frame(left_frame, bg=BG_COLOR)
         left_canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -158,7 +180,7 @@ class PicturePuzzleApp:
         
         # ========== 右侧区域（直接在 Canvas 上绘制，与左侧结构一致）==========
         right_frame = tk.Frame(main_paned, bg=RIGHT_BG_COLOR)
-        main_paned.add(right_frame, width=300)
+        main_paned.add(right_frame, width=500)
         
         right_canvas_frame = tk.Frame(right_frame, bg=RIGHT_BG_COLOR)
         right_canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -303,16 +325,17 @@ class PicturePuzzleApp:
             print(f"加载失败 {img_file}: {e}")
 
     def auto_calculate_shape(self):
-        """自动计算最佳形状"""
-        left_count = sum(1 for img in self.grid_contents.values() if img)
-        total_count = len(self.all_images) + left_count
+        left_imgs = [img for img in self.grid_contents.values() if img is not None]
+        required_left = self._calc_required_cells(left_imgs)
+        required_right = self._calc_required_cells(self.all_images)
+        total_cells = required_left + required_right
 
-        if total_count == 0:
+        if total_cells == 0:
             self.grid_rows, self.grid_cols = DEFAULT_ROWS, DEFAULT_COLS
         else:
-            n = max(1, int(total_count ** 0.5))
+            n = max(1, int(total_cells ** 0.5))
             self.grid_rows = n
-            self.grid_cols = (total_count + n - 1) // n
+            self.grid_cols = (total_cells + n - 1) // n
 
         self.grid_count = self.grid_rows * self.grid_cols
         self.rows_var.set(self.grid_rows)
@@ -759,10 +782,14 @@ class PicturePuzzleApp:
             original = self._open_and_auto_rotate(img_data['path'])
             if ptype == 'wide':
                 scaled_img = original.resize((2 * self.output_width, self.output_height), Image.Resampling.LANCZOS)
-                final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
             else:
                 scaled_img = original.resize((self.output_width, self.output_height), Image.Resampling.LANCZOS)
-                final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
+            blur_pct = self.blur_var.get()
+            if blur_pct > 0:
+                radius = (blur_pct / 100.0) * self.output_width * BLUR_RADIUS_RATIO
+                scaled_img = scaled_img.filter(ImageFilter.GaussianBlur(radius))
+            
+            final_image.paste(scaled_img, (col * self.output_width, row * self.output_height))
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"composite_{self.grid_rows}x{self.grid_cols}_{self.output_width}x{self.output_height}_{timestamp}.png"
@@ -817,6 +844,9 @@ class PicturePuzzleApp:
         """重置所有"""
         self.output_scale_var.set(DEFAULT_SCALE_PERCENT)
         self._on_output_scale_change()
+
+        self.blur_var.set(DEFAULT_BLUR_PERCENT)
+        self._on_blur_change()
 
         # 收集所有不重复的左侧图片（通过 id 去重）
         unique_imgs = {}
@@ -880,6 +910,10 @@ class PicturePuzzleApp:
         self.output_scale_label.config(text=f"{self.output_scale_var.get()}%")
         self.update_status(f"输出尺寸: {self.output_width}x{self.output_height}")
 
+    def _on_blur_change(self, event=None):
+        """模糊滑块变化时更新标签"""
+        self.blur_label.config(text=f"{self.blur_var.get()}%")
+
     def _open_and_auto_rotate(self, img_path):
         """
         打开图片并检测是否为横向标准图（宽高比≈1.59:1），
@@ -891,3 +925,13 @@ class PicturePuzzleApp:
         if abs(ratio - GRID_ASPECT_RATIO) / GRID_ASPECT_RATIO <= RATIO_TOLERANCE:
             pil_img = pil_img.rotate(-90, expand=True)
         return pil_img
+
+    def _calc_required_cells(self, images_list):
+        """计算图片列表所需的格子总数（宽幅图占2格，标准占1格）"""
+        total = 0
+        for img in images_list:
+            if img.get('pic_type') == 'wide':
+                total += 2
+            else:
+                total += 1
+        return total
