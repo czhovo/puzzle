@@ -1,6 +1,7 @@
 imgs/
 out/
-main0.py
+*0*
+*0*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
