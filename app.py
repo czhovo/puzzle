@@ -42,6 +42,9 @@ class PicturePuzzleApp:
         # 模糊
         self.blur_percent = DEFAULT_BLUR_PERCENT
 
+        self.delete_zone_frame = None
+        self.delete_zone_label = None
+
         # 数据结构
         self.left_grids = {}        # {(row, col): (x1,y1,x2,y2)}
         self.grid_contents = {}     # {(row, col): img_data}
@@ -156,7 +159,7 @@ class PicturePuzzleApp:
         
         # ========== 左侧区域 ==========
         left_frame = tk.Frame(main_paned, bg=BG_COLOR)
-        main_paned.add(left_frame, width=1250)
+        main_paned.add(left_frame, width=1280)
         
         left_canvas_frame = tk.Frame(left_frame, bg=BG_COLOR)
         left_canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -180,7 +183,7 @@ class PicturePuzzleApp:
         
         # ========== 右侧区域（直接在 Canvas 上绘制，与左侧结构一致）==========
         right_frame = tk.Frame(main_paned, bg=RIGHT_BG_COLOR)
-        main_paned.add(right_frame, width=550)
+        main_paned.add(right_frame, width=520)
         
         right_canvas_frame = tk.Frame(right_frame, bg=RIGHT_BG_COLOR)
         right_canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -204,19 +207,37 @@ class PicturePuzzleApp:
         self.right_canvas.bind("<Configure>", self._on_right_canvas_resize)
         
         # 状态栏
-        self.status_label = tk.Label(self.root, text="拖拽图片到左侧格子 | 自动计算形状",
-                                      font=('Arial', 10), bg=BG_COLOR, fg='#ecf0f1', anchor=tk.W)
-        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=10)
+        bottom_frame = tk.Frame(self.root, bg=BG_COLOR)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=(0, 10))
 
-        status_frame = tk.Frame(self.root, bg=BG_COLOR)
-        status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=10)
-
-        self.status_label = tk.Label(status_frame, text="拖拽图片到左侧格子 | 自动计算形状",
+        # 状态信息（左）
+        self.status_label = tk.Label(bottom_frame, text="拖拽图片到左侧格子 | 自动计算形状",
                                     font=('Arial', 10), bg=BG_COLOR, fg='#ecf0f1', anchor=tk.W)
         self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self.progress_bar = ttk.Progressbar(status_frame, length=200, mode='determinate')
-        self.progress_bar.pack(side=tk.RIGHT)
+        # 进度条（中）
+        self.progress_bar = ttk.Progressbar(bottom_frame, length=200, mode='determinate')
+        self.progress_bar.pack(side=tk.LEFT, padx=(10, 10))
+
+        # 删除区（右）
+        self.delete_zone_frame = tk.Frame(bottom_frame, bg=DELETE_ZONE_COLOR, cursor='target')
+        self.delete_zone_frame.pack(side=tk.RIGHT, padx=(10, 0))
+        self.delete_zone_label = tk.Label(
+            self.delete_zone_frame,
+            text=" 🗑 拖到此处删除 ",
+            font=('Arial', 10, 'bold'),
+            bg=DELETE_ZONE_COLOR,
+            fg='white',
+            padx=15,
+            pady=3
+        )
+        self.delete_zone_label.pack()
+
+        # 绑定删除区事件（在 drag_handler 中通过 app 访问）
+        self.delete_zone_frame.bind("<Enter>", self._on_delete_zone_enter)
+        self.delete_zone_frame.bind("<Leave>", self._on_delete_zone_leave)
+        self.delete_zone_label.bind("<Enter>", self._on_delete_zone_enter)
+        self.delete_zone_label.bind("<Leave>", self._on_delete_zone_leave)
         
         # 绑定释放事件
         self.root.bind("<ButtonRelease-1>", self.drag_handler.on_drop)
@@ -935,3 +956,34 @@ class PicturePuzzleApp:
             else:
                 total += 1
         return total
+    
+    def _on_delete_zone_enter(self, event):
+        """鼠标进入删除区"""
+        self.delete_zone_frame.configure(bg=DELETE_ZONE_HOVER_COLOR)
+        self.delete_zone_label.configure(bg=DELETE_ZONE_HOVER_COLOR)
+
+    def _on_delete_zone_leave(self, event):
+        """鼠标离开删除区"""
+        self.delete_zone_frame.configure(bg=DELETE_ZONE_COLOR)
+        self.delete_zone_label.configure(bg=DELETE_ZONE_COLOR)
+
+    def delete_image(self, img_data):
+        """从右侧删除一张图片"""
+        folder = img_data.get('folder', '未分类')
+        if folder in self.folder_images:
+            if img_data in self.folder_images[folder]:
+                self.folder_images[folder].remove(img_data)
+                if not self.folder_images[folder]:
+                    del self.folder_images[folder]
+        if img_data in self.all_images:
+            self.all_images.remove(img_data)
+
+    def is_in_delete_zone(self, mouse_x, mouse_y):
+        """检查屏幕坐标是否在删除区内"""
+        if self.delete_zone_frame is None:
+            return False
+        x1 = self.delete_zone_frame.winfo_rootx()
+        y1 = self.delete_zone_frame.winfo_rooty()
+        x2 = x1 + self.delete_zone_frame.winfo_width()
+        y2 = y1 + self.delete_zone_frame.winfo_height()
+        return (x1 <= mouse_x <= x2 and y1 <= mouse_y <= y2)

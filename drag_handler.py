@@ -97,11 +97,17 @@ class DragHandler:
         self.drag_window.geometry(f"+{x-10}+{y-10}")
     
     def on_drag_move(self, event):
-        """拖拽移动"""
         if self.drag_data.get("img_data") is None:
             return
         if self.drag_window:
             self.drag_window.geometry(f"+{event.x_root-10}+{event.y_root-10}")
+        
+        # 删除区高亮
+        if self.drag_data["type"] == "unplaced":
+            if self.app.is_in_delete_zone(event.x_root, event.y_root):
+                self.app._on_delete_zone_enter(None)
+            else:
+                self.app._on_delete_zone_leave(None)
     
     # ==================== 拖拽释放 ====================
     
@@ -113,6 +119,19 @@ class DragHandler:
         mouse_x, mouse_y = event.x_root, event.y_root
         target_key = self._find_target_grid(mouse_x, mouse_y)
         is_in_right = self._is_in_right_area(mouse_x, mouse_y)
+        is_in_delete = self.app.is_in_delete_zone(mouse_x, mouse_y)
+
+        if is_in_delete:
+            drag_type = self.drag_data["type"]
+            img_data = self.drag_data["img_data"]
+            if drag_type == "unplaced":
+                self.app.delete_image(img_data)
+                self.app._draw_right_sections()
+                self.app.update_status(f"已删除 {img_data['label']}")
+            else:
+                self.app.update_status("不能删除已放置的图片，请先放回右侧")
+            self._cleanup_drag()
+            return
         
         if target_key is None and not is_in_right:
             self._cleanup_drag()
@@ -539,6 +558,8 @@ class DragHandler:
         if self.drag_window:
             self.drag_window.destroy()
             self.drag_window = None
+        # 恢复删除区颜色
+        self.app._on_delete_zone_leave(None)
         self.drag_data = {
             "item": None, "type": None, "source_folder": None,
             "source_index": None, "source_key": None, "start_x": 0,
