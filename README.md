@@ -1,8 +1,6 @@
-# puzzle
+# Polaroid Grid
+用于拼接拍立得和宽幅拍立得 具体懒得写了 看看就会用
 
+启动时会加载imgs文件夹下的图片 输出在out文件夹下
 
-thing to do
-
-复杂情况的拼接
-
-错误：自动放置时的顺序错误
+网页版 https://polagrid.netlify.app/

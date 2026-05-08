@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polaroid Grid</title>
+    <style>
+        :root {
+            --bg: #2c3e50;
+            --right-bg: #3d566e;
+            --canvas-bg: #34495e;
+            --grid-color: #2c3e50;
+            --text: #ecf0f1;
+            --delete: #c0392b;
+            --delete-hover: #e74c3c;
+            --btn-green: #27ae60;
+            --btn-blue: #3498db;
+            --btn-purple: #9b59b6;
+            --btn-red: #e74c3c;
+            --btn-teal: #1abc9c;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 10px 20px;
+            background: var(--bg);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            z-index: 10;
+        }
+        .toolbar button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+            transition: opacity 0.2s;
+        }
+        .toolbar button:hover { opacity: 0.85; }
+        .btn-green { background: var(--btn-green); }
+        .btn-purple { background: var(--btn-purple); }
+        .btn-blue { background: var(--btn-blue); }
+        .btn-red { background: var(--btn-red); }
+        .btn-teal { background: var(--btn-teal); }
+
+        .tool-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+        }
+        .tool-group label { white-space: nowrap; }
+        .tool-group input[type="range"] { width: 100px; }
+        .tool-group input[type="number"] {
+            width: 50px;
+            padding: 4px;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-align: center;
+        }
+        .tool-group span { font-size: 12px; min-width: 35px; }
+
+        .main-area {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            gap: 0;
+            padding: 10px;
+        }
+
+        .left-panel {
+            flex: 1;
+            min-width: 300px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--canvas-bg);
+            border-radius: 6px;
+            position: relative;
+        }
+        .left-panel .canvas-container {
+            flex: 1;
+            overflow: auto;
+        }
+
+        .right-panel {
+            width: 300px;
+            min-width: 200px;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--right-bg);
+            border-radius: 6px;
+        }
+        .right-panel .section-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .resizer {
+            width: 6px;
+            cursor: col-resize;
+            background: transparent;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+        .resizer:hover,
+        .resizer.active {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .folder-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--text);
+            margin: 10px 0 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        .folder-title:first-child { margin-top: 0; }
+
+        .image-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 4px 0;
+        }
+
+        .image-item {
+            position: relative;
+            cursor: grab;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 2px solid transparent;
+            transition: border-color 0.2s;
+        }
+        .image-item:hover { border-color: rgba(255,255,255,0.5); }
+        .image-item.dragging-source { opacity: 0.5; }
+        .image-item canvas { display: block; background: var(--grid-color); }
+        .image-item .label {
+            font-size: 9px;
+            text-align: center;
+            color: white;
+            padding: 2px 4px;
+            background: rgba(0,0,0,0.4);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+        .image-item .wide-badge {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 24px;
+            height: 24px;
+            background: gold;
+            clip-path: polygon(0 0, 100% 0, 0 100%);
+        }
+        .image-item .wide-badge::after {
+            content: 'W';
+            position: absolute;
+            top: 2px;
+            left: 3px;
+            font-size: 8px;
+            font-weight: bold;
+            color: black;
+            transform: rotate(-45deg);
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 20px;
+            background: var(--bg);
+            border-top: 1px solid rgba(255,255,255,0.1);
+            font-size: 12px;
+        }
+        .status-bar .status-text { flex: 1; }
+        .status-bar .progress-container {
+            width: 200px;
+            height: 6px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .status-bar .progress-bar {
+            height: 100%;
+            background: var(--btn-blue);
+            width: 0%;
+            transition: width 0.1s;
+        }
+        .delete-zone {
+            padding: 6px 20px;
+            background: var(--delete);
+            color: white;
+            font-size: 13px;
+            font-weight: bold;
+            text-align: center;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-radius: 4px;
+            margin-left: 10px;
+            white-space: nowrap;
+        }
+        .delete-zone.hover { background: var(--delete-hover); }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+
+        #dragFloat {
+            position: fixed;
+            pointer-events: none;
+            display: none;
+            z-index: 9999;
+            border: 2px solid rgba(255,255,255,0.5);
+            border-radius: 4px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            background: #34495e;
+            opacity: 0.85;
+            transition: opacity 0.15s;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 工具栏 -->
+    <div class="toolbar">
+        <button class="btn-green" onclick="document.getElementById('fileInput').click()">📁 导入文件</button>
+        <button class="btn-green" onclick="document.getElementById('folderInput').click()">📂 导入文件夹</button>
+        <button class="btn-purple" onclick="autoPlace()">🎯 自动放置</button>
+        <button class="btn-blue" onclick="outputComposite()">💾 输出拼合</button>
+        <button class="btn-red" onclick="resetAll()">🔄 重置</button>
+
+        <div class="tool-group">
+            <label>输出尺寸:</label>
+            <input type="range" id="outputScale" min="5" max="100" value="100" oninput="onOutputScaleChange()">
+            <span id="outputScaleLabel">100%</span>
+        </div>
+
+        <div class="tool-group">
+            <label>模糊:</label>
+            <input type="range" id="blurSlider" min="0" max="100" value="0" oninput="onBlurChange()">
+            <span id="blurLabel">0%</span>
+        </div>
+
+        <div class="tool-group">
+            <label>行:</label>
+            <input type="number" id="rowsInput" value="2" min="1" max="20" onchange="onShapeChange()">
+            <label>列:</label>
+            <input type="number" id="colsInput" value="2" min="1" max="20" onchange="onShapeChange()">
+            <button class="btn-teal" onclick="autoShape()">📐 自动</button>
+        </div>
+    </div>
+
+    <!-- 主区域 -->
+    <div class="main-area">
+        <div class="left-panel" id="leftPanel">
+            <div class="canvas-container" id="leftContainer">
+                <canvas id="leftCanvas"></canvas>
+            </div>
+        </div>
+        <div class="resizer" id="resizer"></div>
+        <div class="right-panel" id="rightPanel">
+            <div class="section-list" id="rightList"></div>
+        </div>
+    </div>
+
+    <!-- 状态栏 -->
+    <div class="status-bar">
+        <span class="status-text" id="statusText">拖拽图片到左侧格子 | 导入图片开始</span>
+        <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
+        <div class="delete-zone" id="deleteZone">🗑 拖到此处删除</div>
+    </div>
+
+    <!-- 浮动拖拽预览 -->
+    <div id="dragFloat"><canvas id="dragFloatCanvas"></canvas></div>
+
+    <!-- 隐藏的文件输入 -->
+    <input type="file" id="fileInput" multiple accept="image/*" style="display:none" onchange="onFilesSelected(event)">
+    <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none" onchange="onFilesSelected(event)">
+
+    <script>
+        // ==================== 常量 ====================
+        const GRID_ASPECT_RATIO = 1.59;
+        const STANDARD_RATIO = 1.0 / GRID_ASPECT_RATIO;
+        const WIDE_RATIO = 2.0 / GRID_ASPECT_RATIO;
+        const RATIO_TOLERANCE = 0.08;
+        const BASE_OUTPUT_WIDTH = 697;
+        const BASE_OUTPUT_HEIGHT = 1110;
+        const BLUR_RADIUS_RATIO = 0.08;
+        const MIN_PREVIEW_WIDTH = 40;
+        const MAX_PREVIEW_WIDTH = 400;
+        const SMALL_HEIGHT = Math.round(80 * GRID_ASPECT_RATIO);
+
+        // ==================== 全局状态 ====================
+        let gridRows = 2;
+        let gridCols = 2;
+        let previewWidth = 158;
+        let previewHeight = 251;
+        let outputScalePercent = 100;
+        let outputWidth = BASE_OUTPUT_WIDTH;
+        let outputHeight = BASE_OUTPUT_HEIGHT;
+        let blurPercent = 0;
+
+        let leftGrids = {};
+        let gridContents = {};
+        let folderImages = {};
+        let allImages = [];
+        let allLoadedOriginal = [];
+
+        let dragInfo = null;
+        let gridDragInfo = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        const leftCanvas = document.getElementById('leftCanvas');
+        const leftCtx = leftCanvas.getContext('2d');
+        const leftContainer = document.getElementById('leftContainer');
+        const dragFloat = document.getElementById('dragFloat');
+        const dragFloatCanvas = document.getElementById('dragFloatCanvas');
+        const dragFloatCtx = dragFloatCanvas.getContext('2d');
+
+        // ==================== 浮动预览 ====================
+        function showDragFloat(img, picType) {
+            let floatW, floatH;
+            if (picType === 'wide') {
+                floatH = Math.min(previewHeight, 200);
+                floatW = Math.round(floatH * WIDE_RATIO);
+            } else {
+                floatH = Math.min(previewHeight, 200);
+                floatW = Math.round(floatH / GRID_ASPECT_RATIO);
+            }
+            dragFloatCanvas.width = floatW;
+            dragFloatCanvas.height = floatH;
+            dragFloatCtx.clearRect(0, 0, floatW, floatH);
+            dragFloatCtx.fillStyle = '#34495e';
+            dragFloatCtx.fillRect(0, 0, floatW, floatH);
+            dragFloatCtx.drawImage(img, 0, 0, floatW, floatH);
+            dragOffsetX = floatW / 2;
+            dragOffsetY = floatH / 2;
+            dragFloat.style.display = 'block';
+        }
+
+        function updateDragFloatPosition(x, y) {
+            dragFloat.style.left = (x - dragOffsetX) + 'px';
+            dragFloat.style.top = (y - dragOffsetY) + 'px';
+        }
+
+        function hideDragFloat() {
+            dragFloat.style.display = 'none';
+        }
+
+        // ==================== 图片加载 ====================
+        function onFilesSelected(event) {
+            const files = Array.from(event.target.files);
+            if (files.length === 0) return;
+            const isFolder = !!(files[0].webkitRelativePath || files[0].relativePath);
+            addImages(files, isFolder);
+            event.target.value = '';
+        }
+
+        function addImages(files, folderStructure = false) {
+            let loaded = 0;
+            const total = files.length;
+
+            function loadNext(index) {
+                if (index >= files.length) {
+                    if (loaded > 0) {
+                        refreshRightPanel();
+                        autoShape();
+                        drawLeftGrids();
+                        setStatus(`已导入 ${loaded} 张图片`);
+                    }
+                    return;
+                }
+                const file = files[index];
+                let folderName = '导入图片';
+                if (folderStructure && file.webkitRelativePath) {
+                    const parts = file.webkitRelativePath.split('/');
+                    if (parts.length > 2) folderName = parts[1];
+                    else if (parts.length === 2) folderName = '根目录';
+                }
+                const img = new Image();
+                img.onload = () => processImage(img, file.name, folderName, () => loadNext(index + 1));
+                img.onerror = () => { console.warn(`加载失败: ${file.name}`); loadNext(index + 1); };
+                img.src = URL.createObjectURL(file);
+            }
+
+            let _loadedCount = 0;
+
+            function processImage(img, name, folderName, cb) {
+                const w = img.naturalWidth;
+                const h = img.naturalHeight;
+                const ratio = w / h;
+                let processedImg = img;
+                let finalW = w,
+                    finalH = h,
+                    finalRatio = ratio;
+                if (Math.abs(ratio - GRID_ASPECT_RATIO) / GRID_ASPECT_RATIO <= RATIO_TOLERANCE) {
+                    const rotCanvas = document.createElement('canvas');
+                    rotCanvas.width = h;
+                    rotCanvas.height = w;
+                    const rotCtx = rotCanvas.getContext('2d');
+                    rotCtx.translate(h / 2, w / 2);
+                    rotCtx.rotate(Math.PI / 2);
+                    rotCtx.drawImage(img, -w / 2, -h / 2);
+                    processedImg = new Image();
+                    processedImg.src = rotCanvas.toDataURL();
+                    finalW = h;
+                    finalH = w;
+                    finalRatio = finalW / finalH;
+                }
+                let picType;
+                if (Math.abs(finalRatio - STANDARD_RATIO) / STANDARD_RATIO <= RATIO_TOLERANCE) {
+                    picType = 'standard';
+                } else if (Math.abs(finalRatio - WIDE_RATIO) / WIDE_RATIO <= RATIO_TOLERANCE) {
+                    picType = 'wide';
+                } else {
+                    console.warn(`跳过: ${name} (宽高比 ${finalRatio.toFixed(3)})`);
+                    cb();
+                    return;
+                }
+                const imgData = createImageData(processedImg, name, picType);
+                imgData.folder = folderName;
+                if (!folderImages[folderName]) folderImages[folderName] = [];
+                folderImages[folderName].push(imgData);
+                allImages.push(imgData);
+                allLoadedOriginal.push({ img: processedImg, name, type: picType, folder: folderName });
+                loaded++;
+                cb();
+            }
+            loadNext(0);
+        }
+
+        function createImageData(img, name, picType) {
+            const smallW = picType === 'wide' ? Math.round(SMALL_HEIGHT * WIDE_RATIO) : Math.round(SMALL_HEIGHT *
+                STANDARD_RATIO);
+            const smallCanvas = document.createElement('canvas');
+            smallCanvas.width = smallW;
+            smallCanvas.height = SMALL_HEIGHT;
+            const smallCtx = smallCanvas.getContext('2d');
+            smallCtx.drawImage(img, 0, 0, smallW, SMALL_HEIGHT);
+            return {
+                original: img,
+                name,
+                picType,
+                smallCanvas,
+                smallW,
+                smallH: SMALL_HEIGHT,
+                gridStart: null,
+                folder: '导入图片'
+            };
+        }
+
+        // ==================== 右侧面板 ====================
+        function refreshRightPanel() {
+            const container = document.getElementById('rightList');
+            container.innerHTML = '';
+            if (Object.keys(folderImages).length === 0) {
+                container.innerHTML =
+                    '<div style="text-align:center;padding:40px 20px;color:#aaa;">暂无图片<br><br>请导入图片或文件夹</div>';
+                return;
+            }
+            for (const [folderName, images] of Object.entries(folderImages)) {
+                if (images.length === 0) continue;
+                const title = document.createElement('div');
+                title.className = 'folder-title';
+                title.textContent = `📁 ${folderName} (${images.length}张)`;
+                container.appendChild(title);
+                const grid = document.createElement('div');
+                grid.className = 'image-grid';
+                container.appendChild(grid);
+                images.forEach((imgData, idx) => {
+                    const item = document.createElement('div');
+                    item.className = 'image-item';
+                    item.draggable = true;
+                    item.style.width = imgData.smallW + 'px';
+                    const canvas = document.createElement('canvas');
+                    canvas.width = imgData.smallW;
+                    canvas.height = imgData.smallH;
+                    canvas.getContext('2d').drawImage(imgData.smallCanvas, 0, 0);
+                    item.appendChild(canvas);
+                    const label = document.createElement('div');
+                    label.className = 'label';
+                    label.textContent = imgData.name.length > 15 ? imgData.name.substring(0, 15) + '...' : imgData
+                    .name;
+                    item.appendChild(label);
+                    if (imgData.picType === 'wide') {
+                        const badge = document.createElement('div');
+                        badge.className = 'wide-badge';
+                        item.appendChild(badge);
+                    }
+                    item.addEventListener('dragstart', (e) => {
+                        dragInfo = { type: 'unplaced', imgData, sourceFolder: folderName,
+                            sourceIndex: idx };
+                        item.classList.add('dragging-source');
+                        showDragFloat(imgData.original, imgData.picType);
+                        const emptyImg = new Image();
+                        emptyImg.src =
+                            'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                        e.dataTransfer.setDragImage(emptyImg, 0, 0);
+                        e.dataTransfer.effectAllowed = 'move';
+                    });
+                    item.addEventListener('dragend', () => {
+                        item.classList.remove('dragging-source');
+                        hideDragFloat();
+                    });
+                    grid.appendChild(item);
+                });
+            }
+        }
+
+        // ==================== 左侧网格 ====================
+        function calculatePreviewSize() {
+            const containerWidth = leftContainer.clientWidth;
+            const availableWidth = containerWidth - 40;
+            let width = Math.floor(availableWidth / gridCols);
+            if (width < MIN_PREVIEW_WIDTH) width = MIN_PREVIEW_WIDTH;
+            if (width > MAX_PREVIEW_WIDTH) width = MAX_PREVIEW_WIDTH;
+            previewWidth = width;
+            previewHeight = Math.round(width * GRID_ASPECT_RATIO);
+        }
+
+        function initGrids() {
+            gridContents = {};
+            for (let r = 0; r < gridRows; r++)
+                for (let c = 0; c < gridCols; c++)
+                    gridContents[`${r},${c}`] = null;
+        }
+
+        function drawLeftGrids() {
+            calculatePreviewSize();
+            const totalW = gridCols * previewWidth;
+            const totalH = gridRows * previewHeight;
+            const canvasW = Math.max(leftContainer.clientWidth, totalW + 40);
+            const canvasH = Math.max(leftContainer.clientHeight, totalH + 40);
+            leftCanvas.width = canvasW;
+            leftCanvas.height = canvasH;
+            leftCtx.clearRect(0, 0, canvasW, canvasH);
+            const startX = Math.max(10, (canvasW - totalW) / 2);
+            const startY = Math.max(10, (canvasH - totalH) / 2);
+            const colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', '#00BCD4', '#795548', '#607D8B',
+                '#E91E63', '#8BC34A'
+            ];
+            leftGrids = {};
+            for (let r = 0; r < gridRows; r++) {
+                for (let c = 0; c < gridCols; c++) {
+                    const x1 = startX + c * previewWidth;
+                    const y1 = startY + r * previewHeight;
+                    const x2 = x1 + previewWidth;
+                    const y2 = y1 + previewHeight;
+                    const key = `${r},${c}`;
+                    leftGrids[key] = { x1, y1, x2, y2 };
+                    const color = colors[(r * gridCols + c) % colors.length];
+                    leftCtx.strokeStyle = color;
+                    leftCtx.fillStyle = '#2c3e50';
+                    leftCtx.lineWidth = 2;
+                    leftCtx.fillRect(x1, y1, previewWidth, previewHeight);
+                    leftCtx.strokeRect(x1, y1, previewWidth, previewHeight);
+                    leftCtx.fillStyle = color;
+                    leftCtx.font = '10px Arial';
+                    leftCtx.textAlign = 'center';
+                    leftCtx.fillText(`${r+1},${c+1}`, x1 + previewWidth / 2, y1 + 20);
+                }
+            }
+            for (const [key, imgData] of Object.entries(gridContents)) {
+                if (imgData) drawGridImage(key, imgData);
+            }
+            leftCanvas.ondragover = (e) => { e.preventDefault();
+                e.dataTransfer.dropEffect = 'move'; };
+            leftCanvas.ondrop = onLeftCanvasDrop;
+        }
+
+        function drawGridImage(key, imgData) {
+            if (!imgData || !leftGrids[key]) return;
+            const g = leftGrids[key];
+            if (imgData.picType === 'wide' && imgData.gridStart === key) {
+                const [r, c] = key.split(',').map(Number);
+                const nextKey = `${r},${c+1}`;
+                if (!leftGrids[nextKey]) return;
+                const g2 = leftGrids[nextKey];
+                leftCtx.drawImage(imgData.original, g.x1, g.y1, g2.x2 - g.x1, g2.y2 - g.y1);
+            } else if (imgData.picType === 'wide' && imgData.gridStart !== key) {} else {
+                leftCtx.drawImage(imgData.original, g.x1, g.y1, previewWidth, previewHeight);
+            }
+        }
+
+        function getGridKeyFromPoint(x, y) {
+            const rect = leftCanvas.getBoundingClientRect();
+            const containerRect = leftContainer.getBoundingClientRect();
+            // 鼠标相对于容器的坐标 + 容器滚动偏移 = Canvas 上的实际坐标
+            const cx = x - containerRect.left + leftContainer.scrollLeft;
+            const cy = y - containerRect.top + leftContainer.scrollTop;
+            for (const [key, g] of Object.entries(leftGrids)) {
+                if (cx >= g.x1 && cx <= g.x2 && cy >= g.y1 && cy <= g.y2) return key;
+            }
+            return null;
+        }
+
+        function onLeftCanvasDrop(e) {
+            e.preventDefault();
+            hideDragFloat();
+            if (!dragInfo) return;
+            const key = getGridKeyFromPoint(e.clientX, e.clientY);
+            if (!key) { dragInfo = null; return; }
+            handleDrop(key);
+            dragInfo = null;
+            refreshRightPanel();
+            drawLeftGrids();
+        }
+
+        // ==================== 放置逻辑 ====================
+        function handleDrop(targetKey) {
+            const imgData = dragInfo.imgData;
+            const picType = imgData.picType;
+            if (dragInfo.type === 'unplaced') {
+                if (picType === 'standard') {
+                    if (isCellEmpty(targetKey) && !isPartOfWide(targetKey)) {
+                        placeImage(imgData, targetKey);
+                        setStatus(`✓ ${imgData.name} 已放入格子`);
+                    } else setStatus('✗ 目标格已被占用');
+                } else {
+                    const [C, D] = getWideTargetCells(targetKey);
+                    if (C && isCellEmpty(C) && isCellEmpty(D)) {
+                        placeImage(imgData, C);
+                        setStatus('✓ 宽幅图片已放入');
+                    } else setStatus('✗ 目标两格不全空');
+                }
+            } else if (dragInfo.type === 'grid') {
+                moveGridImage(imgData, dragInfo.sourceKey, targetKey);
+            }
+        }
+
+        function placeImage(imgData, key) {
+            if (dragInfo.type === 'unplaced') {
+                const folder = dragInfo.sourceFolder;
+                const idx = dragInfo.sourceIndex;
+                folderImages[folder].splice(idx, 1);
+                if (folderImages[folder].length === 0) delete folderImages[folder];
+                const allIdx = allImages.indexOf(imgData);
+                if (allIdx >= 0) allImages.splice(allIdx, 1);
+            }
+            if (imgData.picType === 'wide') {
+                const [r, c] = key.split(',').map(Number);
+                const nextKey = `${r},${c+1}`;
+                if (!leftGrids[nextKey] || gridContents[key] || gridContents[nextKey]) return false;
+                gridContents[key] = imgData;
+                gridContents[nextKey] = imgData;
+                imgData.gridStart = key;
+            } else {
+                if (gridContents[key]) return false;
+                gridContents[key] = imgData;
+                imgData.gridStart = key;
+            }
+            return true;
+        }
+
+        function moveGridImage(imgData, sourceKey, targetKey) {
+            if (sourceKey === targetKey) return;
+            if (imgData.picType === 'standard') moveStandard(imgData, sourceKey, targetKey);
+            else moveWide(imgData, sourceKey, targetKey);
+        }
+
+        function moveStandard(imgData, A, C) {
+            const wideRegion = getWideRegionAt(C);
+            if (!wideRegion) {
+                if (isCellEmpty(C) || isStandardAt(C)) { swapTwoCells(A, C);
+                    setStatus('✓ 移动完成'); }
+                return;
+            }
+            const [left, right] = wideRegion;
+            const [ar, ac] = A.split(',').map(Number);
+            const [lr, lc] = left.split(',').map(Number);
+            const [rr, rc] = right.split(',').map(Number);
+            if (C === left) {
+                if (ar === lr && ac === lc - 1) { adjacentSwapStandardWide(A, left, right, 'left');
+                    setStatus('✓ 相邻交换'); return; }
+                const required = `${ar},${ac+1}`;
+                if (isValidCell(required) && isCellEmpty(required)) { swapRegions([left, right], [A, required]);
+                    setStatus('✓ 交换成功'); } else setStatus('✗ 无法移动');
+            } else {
+                if (ar === rr && ac === rc + 1) { adjacentSwapStandardWide(A, left, right, 'right');
+                    setStatus('✓ 相邻交换'); return; }
+                const required = `${ar},${ac-1}`;
+                if (isValidCell(required) && isCellEmpty(required)) { swapRegions([left, right], [required, A]);
+                    setStatus('✓ 交换成功'); } else setStatus('✗ 无法移动');
+            }
+        }
+
+        function moveWide(imgData, sourceKey, C) {
+            const start = imgData.gridStart || sourceKey;
+            const [sr, sc] = start.split(',').map(Number);
+            const A = start,
+                B = `${sr},${sc+1}`;
+            const [CT, DT] = getWideTargetCells(C);
+            if (!CT) { setStatus('✗ 目标无效'); return; }
+            if ((CT === A && DT === B) || (CT === B && DT === A)) return;
+            const movedRight = CT === B;
+            const movedLeft = DT === A;
+            if (movedRight) {
+                if (isCellEmpty(DT)) { doWideShift(A, B, CT, DT);
+                    setStatus('✓ 宽幅移动'); return; } else if (isStandardAt(DT)) { adjacentSwapWideStandard(A, B, CT,
+                        DT, DT);
+                    setStatus('✓ 交换成功'); return; }
+            }
+            if (movedLeft) {
+                if (isCellEmpty(CT)) { doWideShift(A, B, CT, DT);
+                    setStatus('✓ 宽幅移动'); return; } else if (isStandardAt(CT)) { adjacentSwapWideStandard(A, B, CT,
+                        DT, CT);
+                    setStatus('✓ 交换成功'); return; }
+            }
+            const cWide = getWideRegionAt(CT),
+                dWide = getWideRegionAt(DT);
+            const targetIsWide = cWide && cWide[0] === CT && cWide[1] === DT;
+            const blockedC = cWide && !(cWide[0] === A && cWide[1] === B) && !(cWide[0] === CT && cWide[1] === DT);
+            const blockedD = dWide && !(dWide[0] === A && dWide[1] === B) && !(dWide[0] === CT && dWide[1] === DT);
+            if (targetIsWide) { swapRegions([A, B], [CT, DT]);
+                setStatus('✓ 宽幅交换'); } else if (!blockedC && !blockedD) {
+                const cOk = isCellEmpty(CT) || isStandardAt(CT),
+                    dOk = isCellEmpty(DT) || isStandardAt(DT);
+                if (cOk && dOk) { swapRegions([A, B], [CT, DT]);
+                    setStatus('✓ 宽幅移动'); } else setStatus('✗ 目标被占用');
+            } else setStatus('✗ 目标被占用');
+        }
+
+        // ==================== 辅助操作 ====================
+        function swapTwoCells(k1, k2) {
+            const img1 = gridContents[k1],
+                img2 = gridContents[k2];
+            gridContents[k1] = null;
+            gridContents[k2] = null;
+            if (img1) { img1.gridStart = k2;
+                gridContents[k2] = img1; }
+            if (img2) { img2.gridStart = k1;
+                gridContents[k1] = img2; }
+        }
+
+        function swapRegions(keys1, keys2) {
+            const c1 = keys1.map(k => gridContents[k] || null),
+                c2 = keys2.map(k => gridContents[k] || null);
+            keys1.forEach(k => gridContents[k] = null);
+            keys2.forEach(k => gridContents[k] = null);
+            for (let i = 0; i < 2; i++) {
+                let img = c1[i];
+                if (img) { if (img.picType === 'wide' && i === 0) { img.gridStart = keys2[0];
+                        gridContents[keys2[0]] = img;
+                        gridContents[keys2[1]] = img; } else if (img.picType !== 'wide') { img.gridStart = keys2[i];
+                        gridContents[keys2[i]] = img; } }
+                img = c2[i];
+                if (img) { if (img.picType === 'wide' && i === 0) { img.gridStart = keys1[0];
+                        gridContents[keys1[0]] = img;
+                        gridContents[keys1[1]] = img; } else if (img.picType !== 'wide') { img.gridStart = keys1[i];
+                        gridContents[keys1[i]] = img; } }
+            }
+        }
+
+        function adjacentSwapStandardWide(stdCell, wideLeft, wideRight, direction) {
+            const wideImg = gridContents[wideLeft],
+                stdImg = gridContents[stdCell];
+            gridContents[stdCell] = null;
+            gridContents[wideLeft] = null;
+            gridContents[wideRight] = null;
+            const [wlr, wlc] = wideLeft.split(',').map(Number),
+                [wrr, wrc] = wideRight.split(',').map(Number);
+            let nwl, nwr, ns;
+            if (direction === 'right') { nwl = `${wlr},${wlc+1}`;
+                nwr = `${wrr},${wrc+1}`;
+                ns = wideLeft; } else { nwl = `${wlr},${wlc-1}`;
+                nwr = `${wrr},${wrc-1}`;
+                ns = wideRight; }
+            wideImg.gridStart = nwl;
+            gridContents[nwl] = wideImg;
+            gridContents[nwr] = wideImg;
+            stdImg.gridStart = ns;
+            gridContents[ns] = stdImg;
+        }
+
+        function doWideShift(A, B, CT, DT) {
+            const img = gridContents[A];
+            gridContents[A] = null;
+            gridContents[B] = null;
+            gridContents[CT] = null;
+            gridContents[DT] = null;
+            img.gridStart = CT;
+            gridContents[CT] = img;
+            gridContents[DT] = img;
+        }
+
+        function adjacentSwapWideStandard(A, B, C, D, stdCell) {
+            const wideImg = gridContents[A],
+                stdImg = gridContents[stdCell];
+            [A, B, C, D, stdCell].forEach(k => gridContents[k] = null);
+            const newStd = stdCell === D ? A : B;
+            wideImg.gridStart = C;
+            gridContents[C] = wideImg;
+            gridContents[D] = wideImg;
+            stdImg.gridStart = newStd;
+            gridContents[newStd] = stdImg;
+        }
+
+        // ==================== 查询辅助 ====================
+        function isCellEmpty(key) { return !gridContents[key]; }
+
+        function isStandardAt(key) { return gridContents[key] && gridContents[key].picType === 'standard'; }
+
+        function isPartOfWide(key) { return !!getWideRegionAt(key); }
+
+        function isValidCell(key) { return key in leftGrids; }
+
+        function getWideRegionAt(key) {
+            const img = gridContents[key];
+            if (!img || img.picType !== 'wide' || !img.gridStart) return null;
+            const [r, c] = img.gridStart.split(',').map(Number);
+            return [img.gridStart, `${r},${c+1}`];
+        }
+
+        function getWideTargetCells(C) {
+            if (!isValidCell(C)) return [null, null];
+            const [r, c] = C.split(',').map(Number);
+            if (c < gridCols - 1) return [C, `${r},${c+1}`];
+            if (c > 0) return [`${r},${c-1}`, C];
+            return [null, null];
+        }
+
+        function findConsecutiveEmpty() {
+            for (let r = 0; r < gridRows; r++)
+                for (let c = 0; c < gridCols - 1; c++)
+                    if (isCellEmpty(`${r},${c}`) && isCellEmpty(`${r},${c+1}`)) return `${r},${c}`;
+            return null;
+        }
+
+        function calcRequiredCells(images) {
+            return images.reduce((t, img) => t + (img.picType === 'wide' ? 2 : 1), 0);
+        }
+
+        // ==================== 自动操作 ====================
+
+        function returnAllToRight() {
+            const uniqueImgs = [...new Set(Object.values(gridContents).filter(Boolean))];
+            uniqueImgs.forEach(img => {
+                const folder = img.folder || '已放回图片';
+                if (!folderImages[folder]) folderImages[folder] = [];
+                if (!folderImages[folder].includes(img)) folderImages[folder].push(img);
+                if (!allImages.includes(img)) allImages.push(img);
+                img.gridStart = null;
+            });
+        }
+
+        function autoShape() {
+            returnAllToRight();
+            
+            const requiredRight = calcRequiredCells(allImages);
+            const total = requiredRight;
+            
+            if (total === 0) {
+                gridRows = 2;
+                gridCols = 2;
+            } else {
+                const n = Math.max(1, Math.floor(Math.sqrt(total)));
+                gridRows = n;
+                gridCols = Math.ceil(total / n);
+            }
+            document.getElementById('rowsInput').value = gridRows;
+            document.getElementById('colsInput').value = gridCols;
+            initGrids();
+            leftGrids = {};
+            drawLeftGrids();
+            refreshRightPanel();
+            setStatus(`自动设置: ${gridRows}行×${gridCols}列，图片已移回右侧`);
+        }
+
+        function onShapeChange() {
+            gridRows = Math.max(1, Math.min(20, parseInt(document.getElementById('rowsInput').value) || 2));
+            gridCols = Math.max(1, Math.min(20, parseInt(document.getElementById('colsInput').value) || 2));
+            document.getElementById('rowsInput').value = gridRows;
+            document.getElementById('colsInput').value = gridCols;
+            
+            returnAllToRight();
+            
+            initGrids();
+            leftGrids = {};
+            drawLeftGrids();
+            refreshRightPanel();
+            setStatus(`已调整: ${gridRows}行×${gridCols}列，图片已移回右侧`);
+        }
+
+        function autoPlace() {
+            if (allImages.length === 0) { setStatus('无图片可放置'); return; }
+            let placed = 0,
+                skipped = 0;
+            for (const img of [...allImages]) {
+                if (img.picType === 'wide') {
+                    const slot = findConsecutiveEmpty();
+                    if (!slot) { skipped++; continue; }
+                    placeImageSimple(img, slot) ? placed++ : skipped++;
+                } else {
+                    const emptyKeys = Object.keys(leftGrids).filter(isCellEmpty);
+                    if (!emptyKeys.length) { skipped++; continue; }
+                    placeImageSimple(img, emptyKeys[0]) ? placed++ : skipped++;
+                }
+            }
+            refreshRightPanel();
+            drawLeftGrids();
+            setStatus(`已放置 ${placed} 张` + (skipped ? `，${skipped} 张跳过` : ''));
+        }
+
+        function placeImageSimple(imgData, key) {
+            const idx = allImages.indexOf(imgData);
+            if (idx >= 0) allImages.splice(idx, 1);
+            for (const [f, imgs] of Object.entries(folderImages)) {
+                const i = imgs.indexOf(imgData);
+                if (i >= 0) { imgs.splice(i, 1); if (!imgs.length) delete folderImages[f]; break; }
+            }
+            if (imgData.picType === 'wide') {
+                const [r, c] = key.split(',').map(Number),
+                    nk = `${r},${c+1}`;
+                if (!leftGrids[nk] || gridContents[key] || gridContents[nk]) return false;
+                gridContents[key] = imgData;
+                gridContents[nk] = imgData;
+                imgData.gridStart = key;
+            } else { if (gridContents[key]) return false;
+                gridContents[key] = imgData;
+                imgData.gridStart = key; }
+            return true;
+        }
+
+        function resetAll() {
+            document.getElementById('outputScale').value = 100;
+            document.getElementById('outputScaleLabel').textContent = '100%';
+            document.getElementById('blurSlider').value = 0;
+            document.getElementById('blurLabel').textContent = '0%';
+            onOutputScaleChange();
+            
+            returnAllToRight();
+            
+            initGrids();
+            leftGrids = {};
+            drawLeftGrids();
+            refreshRightPanel();
+            autoShape();
+            setStatus('已重置');
+        }
+
+        // ==================== 输出合成 ====================
+        function outputComposite() {
+            const outputList = [],
+                seen = new Set();
+            for (const [key, imgData] of Object.entries(gridContents)) {
+                if (!imgData) continue;
+                if (imgData.picType === 'wide') { if (imgData.gridStart !== key) continue; if (seen.has(imgData))
+                    continue;
+                    seen.add(imgData); const [r, c] = key.split(',').map(Number);
+                    outputList.push({ row: r, col: c, imgData, type: 'wide' }); } else { const [r, c] = key.split(',')
+                        .map(Number);
+                    outputList.push({ row: r, col: c, imgData, type: 'standard' }); }
+            }
+            if (!outputList.length) { setStatus('左侧格子为空'); return; }
+            const totalW = gridCols * outputWidth,
+                totalH = gridRows * outputHeight;
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width = totalW;
+            offCanvas.height = totalH;
+            const ctx = offCanvas.getContext('2d');
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, totalW, totalH);
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = '0%';
+            let idx = 0;
+
+            function processNext() {
+                if (idx >= outputList.length) {
+                    progressBar.style.width = '100%';
+                    const link = document.createElement('a');
+                    const ts = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+                    link.download = `composite_${gridRows}x${gridCols}_${outputWidth}x${outputHeight}_${ts}.png`;
+                    link.href = offCanvas.toDataURL();
+                    link.click();
+                    setStatus('输出完成！');
+                    setTimeout(() => progressBar.style.width = '0%', 1500);
+                    return;
+                }
+                const item = outputList[idx];
+                const w = item.type === 'wide' ? 2 * outputWidth : outputWidth;
+                const h = outputHeight;
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = w;
+                tempCanvas.height = h;
+                const tctx = tempCanvas.getContext('2d');
+                if (blurPercent > 0 && typeof tctx.filter !== 'undefined') {
+                    tctx.filter = `blur(${(blurPercent/100)*outputWidth*BLUR_RADIUS_RATIO}px)`;
+                }
+                tctx.drawImage(item.imgData.original, 0, 0, w, h);
+                tctx.filter = 'none';
+                ctx.drawImage(tempCanvas, item.col * outputWidth, item.row * outputHeight);
+                progressBar.style.width = Math.round((idx + 1) / outputList.length * 100) + '%';
+                setStatus(`处理中: ${idx+1}/${outputList.length} - ${item.imgData.name}`);
+                idx++;
+                requestAnimationFrame(processNext);
+            }
+            processNext();
+        }
+
+        function onOutputScaleChange() {
+            outputScalePercent = parseInt(document.getElementById('outputScale').value);
+            document.getElementById('outputScaleLabel').textContent = outputScalePercent + '%';
+            outputWidth = Math.round(BASE_OUTPUT_WIDTH * outputScalePercent / 100);
+            outputHeight = Math.round(BASE_OUTPUT_HEIGHT * outputScalePercent / 100);
+            setStatus(`输出: ${outputWidth}x${outputHeight}`);
+        }
+
+        function onBlurChange() {
+            blurPercent = parseInt(document.getElementById('blurSlider').value);
+            document.getElementById('blurLabel').textContent = blurPercent + '%';
+        }
+
+        // ==================== 删除区 ====================
+        const deleteZone = document.getElementById('deleteZone');
+        deleteZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (dragInfo && dragInfo.type === 'unplaced') { deleteZone.classList.add('hover');
+                e.dataTransfer.dropEffect = 'move'; }
+        });
+        deleteZone.addEventListener('dragleave', () => deleteZone.classList.remove('hover'));
+        deleteZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            deleteZone.classList.remove('hover');
+            hideDragFloat();
+            if (!dragInfo || dragInfo.type !== 'unplaced') { setStatus('不能删除已放置的图片'); return; }
+            const imgData = dragInfo.imgData;
+            deleteImage(imgData);
+            refreshRightPanel();
+            setStatus(`已删除 ${imgData.name}`);
+            dragInfo = null;
+        });
+
+        function deleteImage(imgData) {
+            const folder = imgData.folder || '导入图片';
+            if (folderImages[folder]) {
+                const idx = folderImages[folder].indexOf(imgData);
+                if (idx >= 0) folderImages[folder].splice(idx, 1);
+                if (!folderImages[folder].length) delete folderImages[folder];
+            }
+            const allIdx = allImages.indexOf(imgData);
+            if (allIdx >= 0) allImages.splice(allIdx, 1);
+            const loadedIdx = allLoadedOriginal.findIndex(o => o.name === imgData.name);
+            if (loadedIdx >= 0) allLoadedOriginal.splice(loadedIdx, 1);
+        }
+
+        // ==================== 全局拖拽事件 ====================
+        document.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (dragInfo) updateDragFloatPosition(e.clientX, e.clientY);
+            if (dragInfo && dragInfo.type === 'unplaced') {
+                const dz = deleteZone.getBoundingClientRect();
+                if (e.clientX >= dz.left && e.clientX <= dz.right && e.clientY >= dz.top && e.clientY <= dz
+                    .bottom) {
+                    dragFloat.style.opacity = '0.6';
+                } else dragFloat.style.opacity = '0.85';
+            }
+        });
+        document.addEventListener('drop', (e) => {
+            e.preventDefault();
+            hideDragFloat();
+            if (!dragInfo) return;
+            const leftRect = leftCanvas.getBoundingClientRect();
+            const rightRect = document.getElementById('rightPanel').getBoundingClientRect();
+            const dz = deleteZone.getBoundingClientRect();
+            const mx = e.clientX,
+                my = e.clientY;
+            if (!(mx >= leftRect.left && mx <= leftRect.right && my >= leftRect.top && my <= leftRect.bottom) &&
+                !(mx >= rightRect.left && mx <= rightRect.right && my >= rightRect.top && my <= rightRect.bottom) &&
+                !(mx >= dz.left && mx <= dz.right && my >= dz.top && my <= dz.bottom)) {
+                if (dragInfo.type === 'grid') {
+                    returnImageToRight(dragInfo.imgData);
+                    refreshRightPanel();
+                    drawLeftGrids();
+                    setStatus('已放回右侧');
+                }
+            }
+            dragInfo = null;
+            deleteZone.classList.remove('hover');
+        });
+
+        function returnImageToRight(imgData) {
+            if (imgData.gridStart) {
+                const [r, c] = imgData.gridStart.split(',').map(Number);
+                gridContents[imgData.gridStart] = null;
+                if (imgData.picType === 'wide') gridContents[`${r},${c+1}`] = null;
+                imgData.gridStart = null;
+            }
+            const folder = imgData.folder || '已放回图片';
+            if (!folderImages[folder]) folderImages[folder] = [];
+            if (!folderImages[folder].includes(imgData)) folderImages[folder].push(imgData);
+            if (!allImages.includes(imgData)) allImages.push(imgData);
+        }
+
+        // ==================== 左侧网格鼠标拖拽 ====================
+        leftCanvas.addEventListener('mousedown', (e) => {
+            const key = getGridKeyFromPoint(e.clientX, e.clientY);
+            if (!key || !gridContents[key]) return;
+            const imgData = gridContents[key];
+            gridDragInfo = {
+                imgData,
+                sourceKey: imgData.picType === 'wide' ? (imgData.gridStart || key) : key,
+                type: 'grid',
+                startX: e.clientX,
+                startY: e.clientY,
+                dragging: false
+            };
+            showDragFloat(imgData.original, imgData.picType);
+            hideDragFloat();
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (gridDragInfo) {
+                const dx = e.clientX - gridDragInfo.startX;
+                const dy = e.clientY - gridDragInfo.startY;
+                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                    if (!gridDragInfo.dragging) {
+                        gridDragInfo.dragging = true;
+                        dragInfo = gridDragInfo;
+                        gridDragInfo = null;
+                        leftCanvas.style.cursor = 'grabbing';
+                        dragFloat.style.display = 'block';
+                        updateDragFloatPosition(e.clientX, e.clientY);
+                    }
+                }
+            }
+            if (dragInfo && dragInfo.dragging !== false && dragInfo.type === 'grid') {
+                updateDragFloatPosition(e.clientX, e.clientY);
+            }
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (gridDragInfo) { gridDragInfo = null;
+                hideDragFloat(); return; }
+            if (dragInfo && dragInfo.type === 'grid') {
+                hideDragFloat();
+                const key = getGridKeyFromPoint(e.clientX, e.clientY);
+                if (key) handleDrop(key);
+                else {
+                    const rightRect = document.getElementById('rightPanel').getBoundingClientRect();
+                    if (e.clientX >= rightRect.left && e.clientX <= rightRect.right && e.clientY >= rightRect.top &&
+                        e.clientY <= rightRect.bottom) {
+                        returnImageToRight(dragInfo.imgData);
+                        refreshRightPanel();
+                        drawLeftGrids();
+                        setStatus('已放回右侧');
+                    }
+                }
+                dragInfo = null;
+                refreshRightPanel();
+                drawLeftGrids();
+            }
+            leftCanvas.style.cursor = 'default';
+        });
+
+        // ==================== 拖拽文件夹到页面 ====================
+        document.addEventListener('dragover', (e) => { e.preventDefault(); });
+        document.addEventListener('drop', (e) => {
+            const leftRect = leftCanvas.getBoundingClientRect();
+            const rightRect = document.getElementById('rightPanel').getBoundingClientRect();
+            const dz = deleteZone.getBoundingClientRect();
+            const mx = e.clientX,
+                my = e.clientY;
+            if (!(mx >= leftRect.left && mx <= leftRect.right && my >= leftRect.top && my <= leftRect.bottom) &&
+                !(mx >= rightRect.left && mx <= rightRect.right && my >= rightRect.top && my <= rightRect.bottom) &&
+                !(mx >= dz.left && mx <= dz.right && my >= dz.top && my <= dz.bottom)) {
+                e.preventDefault();
+                const items = e.dataTransfer.items;
+                if (items) {
+                    const files = [];
+                    const processEntry = (entry, path = '') => new Promise((resolve) => {
+                        if (entry.isFile) {
+                            entry.file((file) => { file.relativePath = path + file.name;
+                                files.push(file);
+                                resolve(); });
+                        } else if (entry.isDirectory) {
+                            const dirReader = entry.createReader();
+                            dirReader.readEntries((entries) => {
+                                Promise.all(entries.map(en => processEntry(en, path + entry.name +
+                                    '/'))).then(resolve);
+                            });
+                        } else resolve();
+                    });
+                    const promises = [];
+                    for (let i = 0; i < items.length; i++) {
+                        const entry = items[i].webkitGetAsEntry();
+                        if (entry) promises.push(processEntry(entry));
+                    }
+                    Promise.all(promises).then(() => { if (files.length) addImages(files, true); });
+                }
+            }
+        });
+
+        // ==================== 分隔条拖拽 ====================
+        const resizer = document.getElementById('resizer');
+        const rightPanelDiv = document.getElementById('rightPanel');
+        let isResizing = false;
+        let startX, startWidth;
+
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = rightPanelDiv.getBoundingClientRect().width;
+            resizer.classList.add('active');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const dx = startX - e.clientX;
+            let newWidth = startWidth + dx;
+            newWidth = Math.max(200, Math.min(600, newWidth));
+            rightPanelDiv.style.width = newWidth + 'px';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                resizer.classList.remove('active');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                drawLeftGrids();
+            }
+        });
+
+        // ==================== 状态与初始化 ====================
+        function setStatus(msg) { document.getElementById('statusText').textContent = msg; }
+
+        window.addEventListener('resize', drawLeftGrids);
+        new ResizeObserver(drawLeftGrids).observe(leftContainer);
+
+        function init() {
+            initGrids();
+            calculatePreviewSize();
+            drawLeftGrids();
+            refreshRightPanel();
+            setStatus('拖拽图片到左侧格子 | 导入文件或文件夹开始');
+        }
+        init();
+        console.log('图片拼图工具已就绪');
+    </script>
+</body>
+</html>

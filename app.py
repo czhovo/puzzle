@@ -133,7 +133,7 @@ class PicturePuzzleApp:
                 bg=BG_COLOR, fg='white').pack(side=tk.LEFT)
         
         self.rows_var = tk.IntVar(value=self.grid_rows)
-        self.rows_spinbox = tk.Spinbox(shape_frame, from_=1, to=20, width=3,
+        self.rows_spinbox = tk.Spinbox(shape_frame, from_=1, to=50, width=3,
                                         textvariable=self.rows_var,
                                         font=('Arial', 11),
                                         command=self._on_shape_change)
@@ -143,7 +143,7 @@ class PicturePuzzleApp:
                 bg=BG_COLOR, fg='white').pack(side=tk.LEFT, padx=(10, 0))
         
         self.cols_var = tk.IntVar(value=self.grid_cols)
-        self.cols_spinbox = tk.Spinbox(shape_frame, from_=1, to=20, width=3,
+        self.cols_spinbox = tk.Spinbox(shape_frame, from_=1, to=50, width=3,
                                         textvariable=self.cols_var,
                                         font=('Arial', 11),
                                         command=self._on_shape_change)
