@@ -417,9 +417,9 @@
                 const h = img.naturalHeight;
                 const ratio = w / h;
                 let processedImg = img;
-                let finalW = w,
-                    finalH = h,
-                    finalRatio = ratio;
+                let finalW = w, finalH = h, finalRatio = ratio;
+                
+                // 检测并旋转横向标准图
                 if (Math.abs(ratio - GRID_ASPECT_RATIO) / GRID_ASPECT_RATIO <= RATIO_TOLERANCE) {
                     const rotCanvas = document.createElement('canvas');
                     rotCanvas.width = h;
@@ -428,12 +428,13 @@
                     rotCtx.translate(h / 2, w / 2);
                     rotCtx.rotate(Math.PI / 2);
                     rotCtx.drawImage(img, -w / 2, -h / 2);
-                    processedImg = new Image();
-                    processedImg.src = rotCanvas.toDataURL();
+                    // 直接使用 Canvas 作为图像源
+                    processedImg = rotCanvas;
                     finalW = h;
                     finalH = w;
                     finalRatio = finalW / finalH;
                 }
+                
                 let picType;
                 if (Math.abs(finalRatio - STANDARD_RATIO) / STANDARD_RATIO <= RATIO_TOLERANCE) {
                     picType = 'standard';
@@ -444,8 +445,11 @@
                     cb();
                     return;
                 }
+                
                 const imgData = createImageData(processedImg, name, picType);
                 imgData.folder = folderName;
+                imgData.original = processedImg;  // 确保 original 是旋转后的
+                
                 if (!folderImages[folderName]) folderImages[folderName] = [];
                 folderImages[folderName].push(imgData);
                 allImages.push(imgData);
@@ -457,15 +461,14 @@
         }
 
         function createImageData(img, name, picType) {
-            const smallW = picType === 'wide' ? Math.round(SMALL_HEIGHT * WIDE_RATIO) : Math.round(SMALL_HEIGHT *
-                STANDARD_RATIO);
+            const smallW = picType === 'wide' ? Math.round(SMALL_HEIGHT * WIDE_RATIO) : Math.round(SMALL_HEIGHT * STANDARD_RATIO);
             const smallCanvas = document.createElement('canvas');
             smallCanvas.width = smallW;
             smallCanvas.height = SMALL_HEIGHT;
             const smallCtx = smallCanvas.getContext('2d');
             smallCtx.drawImage(img, 0, 0, smallW, SMALL_HEIGHT);
             return {
-                original: img,
+                original: img,  
                 name,
                 picType,
                 smallCanvas,
