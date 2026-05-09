@@ -99,13 +99,12 @@
         }
         .left-panel .canvas-container {
             flex: 1;
-            overflow: auto;
+            overflow: scroll;
         }
 
         .right-panel {
             width: 300px;
             min-width: 200px;
-            max-width: 600px;
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -1241,7 +1240,15 @@
             if (!isResizing) return;
             const dx = startX - e.clientX;
             let newWidth = startWidth + dx;
-            newWidth = Math.max(200, Math.min(600, newWidth));
+            
+            const mainArea = document.querySelector('.main-area');
+            const totalWidth = mainArea.getBoundingClientRect().width;
+            const leftPanel = document.getElementById('leftPanel');
+            const minRightWidth = totalWidth*0.1;   // 右侧面板最小宽度
+            const minLeftWidth = totalWidth*0.4;    // 左侧面板最小宽度
+            
+            newWidth = Math.max(minRightWidth, Math.min(newWidth, totalWidth - minLeftWidth - 6));
+            
             rightPanelDiv.style.width = newWidth + 'px';
         });
 
