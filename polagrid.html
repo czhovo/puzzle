@@ -68,6 +68,10 @@
         }
         .tool-group label { white-space: nowrap; }
         .tool-group input[type="range"] { width: 100px; }
+        .tool-group input[type="checkbox"] {
+            cursor: pointer;
+            accent-color: var(--btn-teal);
+        }
         .tool-group input[type="number"] {
             width: 50px;
             padding: 4px;
@@ -267,6 +271,11 @@
         </div>
 
         <div class="tool-group">
+            <input type="checkbox" id="whiteBalanceCheck" onchange="onWhiteBalanceChange()">
+            <label for="whiteBalanceCheck">自动白平衡</label>
+        </div>
+
+        <div class="tool-group">
             <label>行:</label>
             <input type="number" id="rowsInput" value="2" min="1" max="20" onchange="onShapeChange()">
             <label>列:</label>
@@ -314,6 +323,11 @@
         const MIN_PREVIEW_WIDTH = 40;
         const MAX_PREVIEW_WIDTH = 400;
         const SMALL_HEIGHT = Math.round(80 * GRID_ASPECT_RATIO);
+        const WHITE_BLOCK_SIZE = 32;
+        const WHITE_NUM_BLOCKS = 10;
+        const WHITE_BALANCE_TARGET = 240;
+        const BRIGHTNESS_THRESHOLD = 170;
+        const NEUTRAL_THRESHOLD = 25;
 
         // ==================== 全局状态 ====================
         let gridRows = 2;
@@ -335,6 +349,8 @@
         let gridDragInfo = null;
         let dragOffsetX = 0;
         let dragOffsetY = 0;
+
+        let autoWhiteBalance = false;
 
         const leftCanvas = document.getElementById('leftCanvas');
         const leftCtx = leftCanvas.getContext('2d');
@@ -955,6 +971,8 @@
             document.getElementById('outputScaleLabel').textContent = '100%';
             document.getElementById('blurSlider').value = 0;
             document.getElementById('blurLabel').textContent = '0%';
+            document.getElementById('whiteBalanceCheck').checked = false;
+            autoWhiteBalance = false;
             onOutputScaleChange();
             
             returnAllToRight();
@@ -965,6 +983,151 @@
             refreshRightPanel();
             autoShape();
             setStatus('已重置');
+        }
+
+        // ==================== 白平衡 ====================
+        function getBorderMask(w, h, picType) {
+            const mask = new Uint8Array(w * h);
+            let outerLeft, outerRight, outerTop, outerBottom;
+            let innerLeft, innerRight, innerTop, innerBottom;
+            
+            if (picType === 'wide') {
+                outerLeft = Math.floor(w * 0.01);
+                outerRight = Math.floor(w * 0.99);
+                outerTop = Math.floor(h * 0.01);
+                outerBottom = Math.floor(h * 0.99);
+                innerLeft = Math.floor(w * 0.03);
+                innerRight = Math.floor(w * 0.97);
+                innerTop = Math.floor(h * 0.07);
+                innerBottom = Math.floor(h * 0.83);
+            } else {
+                outerLeft = Math.floor(w * 0.01);
+                outerRight = Math.floor(w * 0.99);
+                outerTop = Math.floor(h * 0.01);
+                outerBottom = Math.floor(h * 0.99);
+                innerLeft = Math.floor(w * 0.06);
+                innerRight = Math.floor(w * 0.94);
+                innerTop = Math.floor(h * 0.07);
+                innerBottom = Math.floor(h * 0.83);
+            }
+            
+            for (let y = outerTop; y < outerBottom; y++) {
+                for (let x = outerLeft; x < outerRight; x++) {
+                    mask[y * w + x] = 1;
+                }
+            }
+            for (let y = innerTop; y < innerBottom; y++) {
+                for (let x = innerLeft; x < innerRight; x++) {
+                    mask[y * w + x] = 0;
+                }
+            }
+            
+            return mask;
+        }
+
+        function findWhiteRegions(imageData, borderMask, blockSize = 32, numBlocks = 10) {
+            const w = imageData.width;
+            const h = imageData.height;
+            const pixels = imageData.data;
+            
+            // 只使用 RGB 通道
+            const isWhite = new Uint8Array(w * h);
+            for (let i = 0; i < w * h; i++) {
+                const r = pixels[i * 4];
+                const g = pixels[i * 4 + 1];
+                const b = pixels[i * 4 + 2];
+                // 亮色：所有通道 > BRIGHT_THRESHOLD
+                const bright = (r > BRIGHTNESS_THRESHOLD && g > BRIGHTNESS_THRESHOLD && b > BRIGHTNESS_THRESHOLD);
+                // 中性色：三通道标准差 < NEUTRAL_THRESHOLD
+                const mean = (r + g + b) / 3;
+                const std = Math.sqrt(((r - mean) ** 2 + (g - mean) ** 2 + (b - mean) ** 2) / 3);
+                const neutral = std < NEUTRAL_THRESHOLD;
+                isWhite[i] = (bright && neutral && borderMask[i]) ? 1 : 0;
+            }
+            
+            const blocks = [];
+            const step = Math.max(1, Math.floor(blockSize / 2));
+            
+            for (let y = 0; y <= h - blockSize; y += step) {
+                for (let x = 0; x <= w - blockSize; x += step) {
+                    let whiteCount = 0;
+                    let rSum = 0, gSum = 0, bSum = 0;
+                    
+                    for (let by = 0; by < blockSize; by++) {
+                        for (let bx = 0; bx < blockSize; bx++) {
+                            const idx = (y + by) * w + (x + bx);
+                            if (isWhite[idx]) {
+                                whiteCount++;
+                                const pi = idx * 4;
+                                rSum += pixels[pi];
+                                gSum += pixels[pi + 1];
+                                bSum += pixels[pi + 2];
+                            }
+                        }
+                    }
+                    
+                    const whiteRatio = whiteCount / (blockSize * blockSize);
+                    if (whiteRatio > 0.8 && whiteCount > 0) {
+                        const meanR = rSum / whiteCount;
+                        const meanG = gSum / whiteCount;
+                        const meanB = bSum / whiteCount;
+                        
+                        let varR = 0, varG = 0, varB = 0;
+                        for (let by = 0; by < blockSize; by++) {
+                            for (let bx = 0; bx < blockSize; bx++) {
+                                const idx = (y + by) * w + (x + bx);
+                                if (isWhite[idx]) {
+                                    const pi = idx * 4;
+                                    varR += (pixels[pi] - meanR) ** 2;
+                                    varG += (pixels[pi + 1] - meanG) ** 2;
+                                    varB += (pixels[pi + 2] - meanB) ** 2;
+                                }
+                            }
+                        }
+                        varR /= whiteCount;
+                        varG /= whiteCount;
+                        varB /= whiteCount;
+                        const variance = (varR + varG + varB) / 3;
+                        
+                        blocks.push({
+                            x, y,
+                            mean_rgb: [meanR, meanG, meanB],
+                            variance: variance
+                        });
+                    }
+                }
+            }
+            
+            if (blocks.length === 0) {
+                return null;
+            }
+            
+            blocks.sort((a, b) => a.variance - b.variance);
+            return blocks.slice(0, numBlocks);
+        }
+
+        function whiteBalance(imageData, blocks, target = 240) {
+            if (blocks === null || blocks.length === 0) {
+                return imageData;
+            }
+            
+            const allMeans = blocks.map(b => b.mean_rgb);
+            const refR = allMeans.reduce((s, m) => s + m[0], 0) / allMeans.length;
+            const refG = allMeans.reduce((s, m) => s + m[1], 0) / allMeans.length;
+            const refB = allMeans.reduce((s, m) => s + m[2], 0) / allMeans.length;
+            
+            const gainR = target / Math.max(refR, 1);
+            const gainG = target / Math.max(refG, 1);
+            const gainB = target / Math.max(refB, 1);
+            
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                data[i] = Math.min(255, Math.max(0, Math.round(data[i] * gainR)));
+                data[i + 1] = Math.min(255, Math.max(0, Math.round(data[i + 1] * gainG)));
+                data[i + 2] = Math.min(255, Math.max(0, Math.round(data[i + 2] * gainB)));
+            }
+            
+            return imageData;
         }
 
         // ==================== 输出合成 ====================
@@ -1005,19 +1168,41 @@
                     setTimeout(() => progressBar.style.width = '0%', 1500);
                     return;
                 }
+
                 const item = outputList[idx];
                 const w = item.type === 'wide' ? 2 * outputWidth : outputWidth;
                 const h = outputHeight;
+                
+                const orig = item.imgData.original;
+                const origW = orig.naturalWidth || orig.width;
+                const origH = orig.naturalHeight || orig.height;
+                const wbCanvas = document.createElement('canvas');
+                wbCanvas.width = origW;
+                wbCanvas.height = origH;
+                const wbCtx = wbCanvas.getContext('2d');
+                wbCtx.drawImage(orig, 0, 0);
+                
+                if (autoWhiteBalance) {
+                    const imageData = wbCtx.getImageData(0, 0, origW, origH);
+                    const borderMask = getBorderMask(origW, origH, item.type);
+                    const blocks = findWhiteRegions(imageData, borderMask, WHITE_BLOCK_SIZE, WHITE_NUM_BLOCKS);
+                    whiteBalance(imageData, blocks, WHITE_BALANCE_TARGET);
+                    wbCtx.putImageData(imageData, 0, 0);
+                }
+                
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = w;
                 tempCanvas.height = h;
                 const tctx = tempCanvas.getContext('2d');
-                if (blurPercent > 0 && typeof tctx.filter !== 'undefined') {
-                    tctx.filter = `blur(${(blurPercent/100)*outputWidth*BLUR_RADIUS_RATIO}px)`;
+                tctx.drawImage(wbCanvas, 0, 0, w, h);
+                
+                if (blurPercent > 0) {
+                    const radius = (blurPercent / 100) * outputWidth * BLUR_RADIUS_RATIO;
+                    applyBlur(tempCanvas, radius);
                 }
-                tctx.drawImage(item.imgData.original, 0, 0, w, h);
-                tctx.filter = 'none';
+                
                 ctx.drawImage(tempCanvas, item.col * outputWidth, item.row * outputHeight);
+
                 progressBar.style.width = Math.round((idx + 1) / outputList.length * 100) + '%';
                 setStatus(`处理中: ${idx+1}/${outputList.length} - ${item.imgData.name}`);
                 idx++;
@@ -1037,6 +1222,11 @@
         function onBlurChange() {
             blurPercent = parseInt(document.getElementById('blurSlider').value);
             document.getElementById('blurLabel').textContent = blurPercent + '%';
+        }
+        
+        function onWhiteBalanceChange() {
+            autoWhiteBalance = document.getElementById('whiteBalanceCheck').checked;
+            setStatus(autoWhiteBalance ? '自动白平衡已开启' : '自动白平衡已关闭');
         }
 
         // ==================== 删除区 ====================

@@ -42,6 +42,9 @@ class PicturePuzzleApp:
         # 模糊
         self.blur_percent = DEFAULT_BLUR_PERCENT
 
+        self.auto_white_balance = DEFAULT_AUTO_WHITE_BALANCE
+        self.white_balance_var = tk.BooleanVar(value=DEFAULT_AUTO_WHITE_BALANCE)
+
         self.delete_zone_frame = None
         self.delete_zone_label = None
 
@@ -125,6 +128,24 @@ class PicturePuzzleApp:
                                 bg=BG_COLOR, fg='white')
         self.blur_label.pack(side=tk.LEFT)
         
+        # 白平衡控制
+        white_balance_frame = tk.Frame(button_frame, bg=BG_COLOR)
+        white_balance_frame.pack(side=tk.LEFT, padx=20)
+
+        self.white_balance_check = tk.Checkbutton(
+            white_balance_frame,
+            text="自动白平衡",
+            variable=self.white_balance_var,
+            bg=BG_COLOR,
+            fg='white',
+            selectcolor=BG_COLOR,
+            activebackground=BG_COLOR,
+            activeforeground='white',
+            font=('Arial', 11),
+            command=self._on_white_balance_change
+        )
+        self.white_balance_check.pack(side=tk.LEFT)
+
         # 形状调节
         shape_frame = tk.Frame(button_frame, bg=BG_COLOR)
         shape_frame.pack(side=tk.LEFT, padx=20)
@@ -799,12 +820,17 @@ class PicturePuzzleApp:
             self.update_status(f"正在处理: {idx+1}/{len(output_list)} - {img_data['label']}")
             self.root.update_idletasks()
 
-            # 使用辅助方法打开并自动旋转横向图
             original = self._open_and_auto_rotate(img_data['path'])
+            
+            if self.auto_white_balance:
+                original = self._apply_auto_white_balance(original, ptype)
+                self.root.update_idletasks()
+
             if ptype == 'wide':
                 scaled_img = original.resize((2 * self.output_width, self.output_height), Image.Resampling.LANCZOS)
             else:
                 scaled_img = original.resize((self.output_width, self.output_height), Image.Resampling.LANCZOS)
+
             blur_pct = self.blur_var.get()
             if blur_pct > 0:
                 radius = (blur_pct / 100.0) * self.output_width * BLUR_RADIUS_RATIO
@@ -868,6 +894,9 @@ class PicturePuzzleApp:
 
         self.blur_var.set(DEFAULT_BLUR_PERCENT)
         self._on_blur_change()
+
+        self.white_balance_var.set(DEFAULT_AUTO_WHITE_BALANCE)
+        self.auto_white_balance = DEFAULT_AUTO_WHITE_BALANCE
 
         # 收集所有不重复的左侧图片（通过 id 去重）
         unique_imgs = {}
@@ -935,6 +964,13 @@ class PicturePuzzleApp:
         """模糊滑块变化时更新标签"""
         self.blur_label.config(text=f"{self.blur_var.get()}%")
 
+    def _on_white_balance_change(self):
+        self.auto_white_balance = self.white_balance_var.get()
+        if self.auto_white_balance:
+            self.update_status("自动白平衡已开启")
+        else:
+            self.update_status("自动白平衡已关闭")
+
     def _open_and_auto_rotate(self, img_path):
         """
         打开图片并检测是否为横向标准图（宽高比≈1.59:1），
@@ -987,3 +1023,133 @@ class PicturePuzzleApp:
         x2 = x1 + self.delete_zone_frame.winfo_width()
         y2 = y1 + self.delete_zone_frame.winfo_height()
         return (x1 <= mouse_x <= x2 and y1 <= mouse_y <= y2)
+    
+    def _get_border_mask(self, image, pic_type):
+        """
+        生成拍立得边框区域的掩码。
+        """
+        import numpy as np
+        h, w = image.shape[:2]
+        mask = np.zeros((h, w), dtype=bool)
+        
+        if pic_type == 'wide':
+            # 水平：1%-3%, 97%-99%；竖直：1%-7%, 83%-99%
+            outer_left, outer_right, outer_top, outer_bottom = int(w * 0.01), int(w * 0.99), int(h * 0.01), int(h * 0.99)
+            inner_left, inner_right, inner_top, inner_bottom = int(w * 0.03), int(w * 0.97), int(h * 0.07), int(h * 0.83)
+
+            mask[outer_top:outer_bottom, outer_left:outer_right] = True
+            mask[inner_top:inner_bottom, inner_left:inner_right] = False
+        
+        else:
+            # 水平：1%-6%, 94%-99%；竖直：1%-7%, 83%-99%
+            outer_left, outer_right, outer_top, outer_bottom = int(w * 0.01), int(w * 0.99), int(h * 0.01), int(h * 0.99)
+            inner_left, inner_right, inner_top, inner_bottom = int(w * 0.06), int(w * 0.94), int(h * 0.07), int(h * 0.83)
+
+            mask[outer_top:outer_bottom, outer_left:outer_right] = True
+            mask[inner_top:inner_bottom, inner_left:inner_right] = False
+        
+        return mask
+
+
+    def _find_white_regions(self, image, border_mask, block_size=32, num_blocks=10, bright_threshold=170, neutral_threshold=25):
+        """
+        在边框区域内寻找最适合做白平衡参考的白色块。
+        """
+        import numpy as np
+        
+        # 只使用 RGB 通道
+        if len(image.shape) == 3 and image.shape[2] == 4:
+            rgb = image[:, :, :3]
+        else:
+            rgb = image
+        
+        # 亮色：所有通道 > 200
+        is_bright = np.all(rgb > bright_threshold, axis=2)
+        # 中性色：三通道标准差 < 25
+        is_neutral = np.std(rgb.astype(np.float32), axis=2) < neutral_threshold
+        # 白色区域 = 亮色 + 中性色 + 边框范围内
+        is_white = is_bright & is_neutral & border_mask
+        
+        blocks = []
+        step = max(1, block_size // 2)
+        
+        for y in range(0, rgb.shape[0] - block_size, step):
+            for x in range(0, rgb.shape[1] - block_size, step):
+                block_mask = is_white[y:y+block_size, x:x+block_size]
+                white_ratio = np.sum(block_mask) / (block_size ** 2)
+                
+                if white_ratio > 0.8:
+                    white_pixels = rgb[y:y+block_size, x:x+block_size][block_mask]
+                    
+                    if len(white_pixels) > 0:
+                        mean_rgb = np.mean(white_pixels, axis=0)
+                        variance = np.mean(np.var(white_pixels, axis=0))
+                        blocks.append({
+                            'x': x,
+                            'y': y,
+                            'mean_rgb': mean_rgb,
+                            'variance': variance
+                        })
+        
+        if len(blocks) == 0:
+            return None
+        
+        blocks.sort(key=lambda b: b['variance'])
+        best_blocks = blocks[:num_blocks]
+        
+        return best_blocks
+
+    def _white_balance(self, image, blocks, target=240):
+        """
+        根据参考白色块执行白平衡校正。
+        """
+        import numpy as np
+        
+        if blocks is None or len(blocks) == 0:
+            return image
+        
+        all_means = np.array([b['mean_rgb'] for b in blocks])
+        reference_white = np.mean(all_means, axis=0)
+        
+        gains = np.array([
+            target / max(reference_white[0], 1),
+            target / max(reference_white[1], 1),
+            target / max(reference_white[2], 1)
+        ])
+        
+        channels = image.shape[2] if len(image.shape) == 3 else 1
+    
+        if channels == 4:
+            wb_image = image.astype(np.float32)
+            wb_image[:, :, :3] = wb_image[:, :, :3] * gains
+            wb_image = np.clip(wb_image, 0, 255).astype(np.uint8)
+        else:
+            wb_image = image.astype(np.float32) * gains
+            wb_image = np.clip(wb_image, 0, 255).astype(np.uint8)
+        
+        return wb_image
+    
+    def _apply_auto_white_balance(self, pil_image, pic_type):
+        """
+        对 PIL 图像执行自动白平衡。
+        """
+        import numpy as np
+        from PIL import Image
+        
+        # PIL → numpy array (RGB)
+        arr = np.array(pil_image)
+        
+        # 生成边框掩码
+        border_mask = self._get_border_mask(arr, pic_type)
+        
+        # 寻找白色参考块
+        blocks = self._find_white_regions(arr, border_mask, 
+                                          block_size=WHITE_BLOCK_SIZE,
+                                          num_blocks=WHITE_NUM_BLOCKS,
+                                          bright_threshold=BRIGHTNESS_THRESHOLD,
+                                          neutral_threshold=NEUTRAL_THRESHOLD)
+        
+        # 执行白平衡
+        result = self._white_balance(arr, blocks, WHITE_BALANCE_TARGET)
+        
+        return Image.fromarray(result)
